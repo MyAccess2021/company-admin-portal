@@ -1,5 +1,4 @@
-  
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Layout, 
   Button, 
@@ -70,92 +69,725 @@ const PayrollManagement = () => {
     totalPayroll: 0,
     thisMonth: 0
   });
-  const [earnings, setEarnings] = useState([
-    { key: 'basic', label: 'Basic', value: 0 },
-    { key: 'hra', label: 'House Rent Allowance', value: 0 }
-  ]);
-  const [deductions, setDeductions] = useState([
-    { key: 'incomeTax', label: 'Income Tax', value: 0 },
-    { key: 'pf', label: 'Provident Fund', value: 0 }
-  ]);
+  const [earnings, setEarnings] = useState([]);
+const [deductions, setDeductions] = useState([]);
+const [monthlyExpensesData, setMonthlyExpensesData] = useState([]);
+const [expensesList, setExpensesList] = useState([]);
+const [thisMonthPayroll, setThisMonthPayroll] = useState(0);
+const [isPayrollEdited, setIsPayrollEdited] = useState(false);
+const [expensesModalVisible, setExpensesModalVisible] = useState(false);
+const [payrollEditModalVisible, setPayrollEditModalVisible] = useState(false);
+const [selectedEmployees, setSelectedEmployees] = useState([]);
+const [bulkActionType, setBulkActionType] = useState('');
+const [selectedExpenseMonth, setSelectedExpenseMonth] = useState(dayjs().format('YYYY-MM'));
+const ExpensesList = ({ expenses, onChange }) => {
+  const [localExpenses, setLocalExpenses] = useState(expenses || [{ label: '', amount: 0 }]);
 
-  const addEarning = () => {
-    const newKey = `earning_${Date.now()}`;
-    setEarnings([...earnings, { key: newKey, label: '', value: 0 }]);
+
+
+  // Only sync when expenses prop actually changes from parent
+  useEffect(() => {
+    if (expenses && expenses !== localExpenses) {
+      setLocalExpenses(expenses);
+    }
+  }, [expenses]);
+
+  // Update parent only when user stops typing (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onChange(localExpenses);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [localExpenses]);
+
+  
+
+  const addExpense = () => {
+    setLocalExpenses([...localExpenses, { label: '', amount: 0 }]);
   };
 
-  const onSaveData = async (values) => {
-    try {
-      setLoading(true);
-      
-      if (!values.companyName) {
-        message.error('Company name is required');
-        return;
-      }
-      if (!values.userId) {
-        message.error('Please select an employee');
-        return;
-      }
-      if (!values.payPeriod) {
-        message.error('Pay period is required');
-        return;
-      }
-      if (!values.payDate) {
-        message.error('Pay date is required');
-        return;
-      }
-      
-      const payPeriodFormatted = values.payPeriod && values.payPeriod.format ? 
-        values.payPeriod.format('YYYY-MM-DD') : 
-        dayjs(values.payPeriod).format('YYYY-MM-DD');
-        
-      const payDateFormatted = values.payDate && values.payDate.format ? 
-        values.payDate.format('YYYY-MM-DD') : 
-        dayjs(values.payDate).format('YYYY-MM-DD');
-      
-      const { data, error } = await supabase
-        .from('payroll')
-        .insert([{
-          company_name: values.companyName,
-          company_address: values.companyAddress || null,
-          city: values.city || null,
-          country: values.country || 'India',
-          employee_name: values.employeeName || null,
-          employee_id: values.employeeId || null,
-          email_address: values.emailAddress || null,
-          pay_period: payPeriodFormatted,
-          pay_date: payDateFormatted,
-          paid_days: values.paidDays || 0,
-          lop_days: values.lopDays || 0,
-          user_id: values.userId,
-          basic: values.basic || 0,
-          hra: values.hra || 0,
-          income_tax: values.incomeTax || 0,
-          pf: values.pf || 0,
-          gender: values.gender || null,
-          designation: values.designation || null,
-          transaction_id: values.transactionId || null,
-          pan_number: values.panNumber || null,
-          employee_bank: values.employeeBank || null,
-          bank_account: values.bankAccount || null,
-          uan_number: values.uanNumber || null,
-          esi_number: values.esiNumber || null
-        }])
-        .select();
+  const updateExpense = (index, field, value) => {
+    const updated = [...localExpenses];
+    updated[index][field] = value;
+    setLocalExpenses(updated);
+  };
 
-      if (error) throw error;
-
-      message.success('Payroll data saved successfully!');
-      form.resetFields();
-      fetchEmployees();
-      fetchStats();
-    } catch (error) {
-      console.error('Save error:', error);
-      message.error('Error saving payroll data: ' + error.message);
-    } finally {
-      setLoading(false);
+  const removeExpense = (index) => {
+    if (localExpenses.length > 1) {
+      setLocalExpenses(localExpenses.filter((_, i) => i !== index));
     }
   };
+
+  return (
+    <div>
+      <Button 
+        type="dashed" 
+        icon={<PlusOutlined />} 
+        onClick={addExpense}
+        style={{ marginBottom: '16px' }}
+      >
+        Add Expense
+      </Button>
+      
+      {localExpenses.map((expense, index) => (
+        <Row key={index} gutter={8} style={{ marginBottom: '8px' }}>
+          <Col span={12}>
+            <Input
+              placeholder="Expense label"
+              value={expense.label}
+              onChange={(e) => updateExpense(index, 'label', e.target.value)}
+            />
+          </Col>
+          <Col span={8}>
+            <InputNumber
+              placeholder="Amount"
+              value={expense.amount}
+              onChange={(value) => updateExpense(index, 'amount', value || 0)}
+              style={{ width: '100%' }}
+            />
+          </Col>
+          <Col span={4}>
+            <Button 
+              danger 
+              onClick={() => removeExpense(index)}
+              disabled={localExpenses.length === 1}
+            >
+              Delete
+            </Button>
+          </Col>
+        </Row>
+      ))}
+      
+      <div style={{ marginTop: '16px', textAlign: 'right', fontWeight: 'bold' }}>
+        Total: ₹{localExpenses.reduce((sum, exp) => sum + (exp.amount || 0), 0).toLocaleString()}
+      </div>
+    </div>
+  );
+};
+
+const handleExcelExport = async () => {
+  try {
+    setLoading(true);
+    
+    const startOfMonth = selectedMonth.startOf('month').format('YYYY-MM-DD');
+    
+    const { data: payrollData, error } = await supabase
+      .from('payroll')
+      .select(`
+        *,
+        users (
+          name,
+          employee_id,
+          email,
+          role,
+          pay
+        )
+      `)
+      .gte('pay_period', startOfMonth)
+      .lt('pay_period', selectedMonth.add(1, 'month').startOf('month').format('YYYY-MM-DD'))
+      .in('user_id', selectedEmployees);
+
+    if (error) throw error;
+
+    const excelData = payrollData?.map(record => {
+      const earningsArray = record.earnings || [];
+      const deductionsArray = record.deductions || [];
+      const totalEarnings = earningsArray.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const totalDeductions = deductionsArray.reduce((sum, item) => sum + (item.amount || 0), 0);
+      const netPay = totalEarnings - totalDeductions;
+      
+      return {
+        'Employee ID': record.employee_id || record.users?.employee_id,
+        'Name': record.employee_name || record.users?.name,
+        'Email': record.email_address || record.users?.email,
+        'Role': record.users?.role,
+        'Salary': netPay
+      };
+    }) || [];
+
+    // Convert to CSV and download
+    const csvContent = [
+      Object.keys(excelData[0]).join(','),
+      ...excelData.map(row => Object.values(row).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Payroll_${selectedMonth.format('YYYY-MM')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    message.success('Excel export completed!');
+    setBulkDownloadVisible(false);
+  } catch (error) {
+    message.error('Error exporting data: ' + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const saveMonthlyExpenses = async (expenses) => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    const { data: existing, error: fetchError } = await supabase
+      .from('monthly_expenses')
+      .select('id')
+      .eq('month_year', currentMonth)
+      .maybeSingle();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    
+    if (existing) {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .update({ 
+          expenses: expenses,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+      
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .insert({
+          month_year: currentMonth,
+          expenses: expenses,
+          this_month_payroll: thisMonthPayroll,
+          is_payroll_edited: false
+        });
+      
+      if (error) throw error;
+    }
+    
+    message.success('Monthly expenses saved successfully!');
+    fetchStats();
+  } catch (error) {
+    message.error('Error saving expenses: ' + error.message);
+  }
+};
+
+const saveEditedPayroll = async (amount) => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    const { data: existing, error: fetchError } = await supabase
+      .from('monthly_expenses')
+      .select('id')
+      .eq('month_year', currentMonth)
+      .maybeSingle();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    
+    if (existing) {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .update({ 
+          this_month_payroll: amount,
+          is_payroll_edited: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+      
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .insert({
+          month_year: currentMonth,
+          expenses: monthlyExpensesData,
+          this_month_payroll: amount,
+          is_payroll_edited: true
+        });
+      
+      if (error) throw error;
+    }
+    
+    message.success('This month payroll updated successfully!');
+    setPayrollEditModalVisible(false);
+    fetchStats();
+  } catch (error) {
+    message.error('Error updating payroll: ' + error.message);
+  }
+};
+  const addEarning = () => {
+  const newKey = `earning_${Date.now()}`;
+  const newEarning = { key: newKey, label: '', value: 0 };
+  setEarnings([...earnings, newEarning]);
+  
+  // Set initial form value
+  const formValues = form.getFieldsValue();
+  formValues[newKey] = 0;
+  form.setFieldsValue(formValues);
+};
+
+useEffect(() => {
+  const initializeData = async () => {
+    await loadUsers();
+    await fetchEmployees();
+    const currentMonth = dayjs().format('YYYY-MM');
+    await fetchExpenses(currentMonth);
+    fetchStats();
+  };
+  
+  initializeData();
+}, []);
+
+const handleEmployeeSelect = async (userId) => {
+  const selectedUser = users.find(user => user.id === userId);
+  if (selectedUser) {
+    // Get user's pay from users table
+    const { data: userData, error } = await supabase
+      .from('users')
+      .select('pay')
+      .eq('id', userId)
+      .single();
+    
+    // Check if payroll exists for current month
+    const currentMonth = dayjs().format('YYYY-MM-DD');
+    const { data: existingPayroll } = await supabase
+      .from('payroll')
+      .select('earnings, deductions')
+      .eq('user_id', userId)
+      .eq('pay_period', currentMonth)
+      .maybeSingle();
+
+    if (existingPayroll) {
+      // Set earnings from database
+      const dbEarnings = existingPayroll.earnings.map(item => ({
+        key: item.type,
+        label: item.label,
+        value: item.amount
+      }));
+      setEarnings(dbEarnings);
+      
+      // Set deductions from database  
+      const dbDeductions = existingPayroll.deductions.map(item => ({
+        key: item.type,
+        label: item.label, 
+        value: item.amount
+      }));
+      setDeductions(dbDeductions);
+      
+      // Set form values with existing payroll data
+      const formValues = {
+        employeeName: selectedUser.name,
+        employeeId: selectedUser.employee_id,
+        emailAddress: selectedUser.email,
+      };
+      
+      // Add earnings to form values
+      existingPayroll.earnings.forEach(item => {
+        formValues[item.type] = item.amount;
+      });
+      
+      // Add deductions to form values
+      existingPayroll.deductions.forEach(item => {
+        formValues[item.type] = item.amount;
+      });
+      
+      form.setFieldsValue(formValues);
+    } else {
+      // No existing payroll - use default logic
+      if (userData?.pay) {
+        // Pre-fill earnings with user's pay as basic
+        const basicEarning = { key: 'basic', label: 'Basic', value: parseFloat(userData.pay) };
+        const hraEarning = { key: 'hra', label: 'House Rent Allowance', value: 0 };
+        
+        setEarnings([basicEarning, hraEarning]);
+        
+        // Set form field values
+        const formValues = {
+          employeeName: selectedUser.name,
+          employeeId: selectedUser.employee_id,
+          emailAddress: selectedUser.email,
+          basic: parseFloat(userData.pay),
+          hra: 0
+        };
+        
+        form.setFieldsValue(formValues);
+      } else {
+        // Set default earnings if no pay data
+        const basicEarning = { key: 'basic', label: 'Basic', value: 0 };
+        const hraEarning = { key: 'hra', label: 'House Rent Allowance', value: 0 };
+        
+        setEarnings([basicEarning, hraEarning]);
+        
+        form.setFieldsValue({
+          employeeName: selectedUser.name,
+          employeeId: selectedUser.employee_id,
+          emailAddress: selectedUser.email,
+          basic: 0,
+          hra: 0
+        });
+      }
+      
+      // Set default deductions
+      const incomeTaxDeduction = { key: 'income_tax', label: 'Income Tax', value: 0 };
+      const pfDeduction = { key: 'pf', label: 'Provident Fund', value: 0 };
+      
+      setDeductions([incomeTaxDeduction, pfDeduction]);
+      
+      // Set deduction form values
+      const currentFormValues = form.getFieldsValue();
+      form.setFieldsValue({
+        ...currentFormValues,
+        income_tax: 0,
+        pf: 0
+      });
+    }
+  }
+};
+
+const fetchStats = async () => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    // Get monthly expenses data
+    const { data: monthlyData, error: monthlyError } = await supabase
+      .from('monthly_expenses')
+      .select('*')
+      .eq('month_year', currentMonth)
+      .maybeSingle();
+    
+    if (monthlyError && monthlyError.code !== 'PGRST116') throw monthlyError;
+    
+    let thisMonth = 0;
+    let isEdited = false;
+    
+    if (monthlyData) {
+      if (monthlyData.is_payroll_edited && monthlyData.this_month_payroll !== null) {
+        // Use edited value
+        thisMonth = monthlyData.this_month_payroll;
+        isEdited = true;
+      } else {
+        // Calculate from payroll data
+        thisMonth = await calculateThisMonthPayroll(currentMonth);
+      }
+      setMonthlyExpensesData(monthlyData.expenses || []);
+    } else {
+      // Calculate from payroll data for new month
+      thisMonth = await calculateThisMonthPayroll(currentMonth);
+      setMonthlyExpensesData([]);
+    }
+    
+    // Get total payroll from all months
+    const { data: allMonthlyData, error: totalError } = await supabase
+  .from('monthly_expenses')
+  .select('this_month_payroll, is_payroll_edited, month_year');
+
+if (totalError) throw totalError;
+
+let totalPayroll = 0;
+for (const record of allMonthlyData || []) {
+  if (record.is_payroll_edited && record.this_month_payroll !== null) {
+    totalPayroll += record.this_month_payroll;
+  } else {
+    // Calculate from payroll data for this specific month
+    const monthPayroll = await calculateThisMonthPayroll(record.month_year);
+    totalPayroll += monthPayroll;
+  }
+}
+
+// If no monthly data exists, calculate total from all payroll records
+if (!allMonthlyData || allMonthlyData.length === 0) {
+  const { data: payrollData, error: payrollError } = await supabase
+    .from('payroll')
+    .select('final_payslips');
+  
+  if (payrollError) throw payrollError;
+  
+  payrollData?.forEach(record => {
+    const payslips = record.final_payslips || [];
+    payslips.forEach(payslip => {
+      totalPayroll += payslip.amount || 0;
+    });
+  });
+}
+    
+    setStats({ 
+      totalEmployees: users.length, 
+      totalPayroll, 
+      thisMonth 
+    });
+    setThisMonthPayroll(thisMonth);
+    setIsPayrollEdited(isEdited);
+  } catch (error) {
+    console.error('Error fetching stats:', error);
+  }
+};
+
+const calculateThisMonthPayroll = async (currentMonth) => {
+  const { data: payrollData, error } = await supabase
+    .from('payroll')
+    .select('final_payslips');
+  
+  if (error) throw error;
+  
+  let total = 0;
+  payrollData?.forEach(record => {
+    const payslips = record.final_payslips || [];
+    payslips.forEach(payslip => {
+      if (payslip.month === currentMonth) {
+        total += payslip.amount || 0;
+      }
+    });
+  });
+  
+  return total;
+};
+
+const fetchExpenses = async (monthYear) => {
+  try {
+    const { data, error } = await supabase
+      .from('monthly_expenses')
+      .select('*')
+      .eq('month_year', monthYear)
+      .maybeSingle(); // Change to maybeSingle since we want one record per month
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    
+    // Set the expenses array from the single record
+    setMonthlyExpensesData(data?.expenses || [{ label: '', amount: 0 }]);
+  } catch (error) {
+    message.error('Error fetching expenses: ' + error.message);
+  }
+};
+
+const saveExpense = async (values) => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    const { error } = await supabase
+      .from('monthly_expenses')
+      .insert({
+        month_year: currentMonth,
+        label: values.label,
+        amount: values.amount
+      });
+    
+    if (error) throw error;
+    
+    message.success('Expense added successfully!');
+    expenseForm.resetFields();
+    fetchExpenses(currentMonth);
+    fetchStats(); // Refresh stats
+  } catch (error) {
+    message.error('Error saving expense: ' + error.message);
+  }
+};
+
+const deleteExpense = async (id) => {
+  try {
+    const { error } = await supabase
+      .from('monthly_expenses')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    
+    message.success('Expense deleted successfully!');
+    const currentMonth = dayjs().format('YYYY-MM');
+    fetchExpenses(currentMonth);
+    fetchStats(); // Refresh stats
+  } catch (error) {
+    message.error('Error deleting expense: ' + error.message);
+  }
+};
+
+const uploadPDFToStorage = async (pdfBlob, employee) => {
+  try {
+    // Generate unique filename
+    const fileName = `payslip_${employee.employee_id || 'unknown'}_${dayjs(employee.pay_period).format('YYYY-MM')}_${Date.now()}.pdf`;
+    
+    console.log('Uploading PDF to storage:', fileName);
+    console.log('PDF blob size:', pdfBlob.size);
+    
+    // Upload PDF to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+  .from('payslips')
+  .upload(fileName, pdfBlob, {
+    contentType: 'application/pdf',
+    upsert: true
+  })
+
+    if (uploadError) {
+      console.error('Error uploading PDF:', uploadError);
+      throw new Error(`Failed to upload PDF: ${uploadError.message}`);
+    }
+
+    console.log('PDF uploaded successfully:', uploadData);
+
+    // Get public URL for the uploaded file
+    const { data: urlData } = supabase.storage
+      .from('payslips')
+      .getPublicUrl(fileName);
+
+    if (!urlData || !urlData.publicUrl) {
+      throw new Error('Failed to get public URL for uploaded PDF');
+    }
+
+    return {
+      url: urlData.publicUrl,
+      fileName: fileName,
+      path: uploadData.path
+    };
+
+  } catch (error) {
+    console.error('PDF upload error:', error);
+    throw error;
+  }
+};
+
+  const onSaveData = async (values) => {
+  try {
+    setLoading(true);
+    
+    if (!values.companyName) {
+      message.error('Company name is required');
+      return;
+    }
+    if (!values.userId) {
+      message.error('Please select an employee');
+      return;
+    }
+    if (!values.payPeriod) {
+      message.error('Pay period is required');
+      return;
+    }
+    if (!values.payDate) {
+      message.error('Pay date is required');
+      return;
+    }
+    
+    const payPeriodFormatted = values.payPeriod && values.payPeriod.format ? 
+      values.payPeriod.format('YYYY-MM-DD') : 
+      dayjs(values.payPeriod).format('YYYY-MM-DD');
+      
+    const payDateFormatted = values.payDate && values.payDate.format ? 
+      values.payDate.format('YYYY-MM-DD') : 
+      dayjs(values.payDate).format('YYYY-MM-DD');
+
+    // Create earningsData and deductionsData from state
+    const earningsData = earnings.map(earning => ({
+      type: earning.key,
+      label: earning.label,
+      amount: form.getFieldValue(earning.key) || 0
+    }));
+
+    const deductionsData = deductions.map(deduction => ({
+      type: deduction.key, 
+      label: deduction.label,
+      amount: form.getFieldValue(deduction.key) || 0
+    }));
+
+    // Check if record already exists
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('payroll')
+      .select('id')
+      .eq('user_id', values.userId)
+      .eq('pay_period', payPeriodFormatted)
+      .maybeSingle();
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
+    }
+
+    const payrollData = {
+      company_name: values.companyName,
+      company_address: values.companyAddress || null,
+      city: values.city || null,
+      country: values.country || 'India',
+      employee_name: values.employeeName || null,
+      employee_id: values.employeeId || null,
+      email_address: values.emailAddress || null,
+      pay_period: payPeriodFormatted,
+      pay_date: payDateFormatted,
+      paid_days: values.paidDays || 0,
+      lop_days: values.lopDays || 0,
+      user_id: values.userId,
+      gender: values.gender || null,
+      designation: values.designation || null,
+      transaction_id: values.transactionId || null,
+      pan_number: values.panNumber || null,
+      employee_bank: values.employeeBank || null,
+      bank_account: values.bankAccount || null,
+      uan_number: values.uanNumber || null,
+      esi_number: values.esiNumber || null,
+      earnings: earningsData,
+      deductions: deductionsData,
+    };
+
+    let data, error;
+
+    if (existingRecord) {
+      // Update existing record
+      const { data: updateData, error: updateError } = await supabase
+        .from('payroll')
+        .update(payrollData)
+        .eq('id', existingRecord.id)
+        .select();
+
+      data = updateData;
+      error = updateError;
+      
+      if (!error) {
+        message.success('Payroll data updated successfully!');
+      }
+    } else {
+      // Insert new record
+      const { data: insertData, error: insertError } = await supabase
+        .from('payroll')
+        .insert([payrollData])
+        .select();
+
+      data = insertData;
+      error = insertError;
+      
+      if (!error) {
+        message.success('Payroll data saved successfully!');
+      }
+    }
+
+    if (error) throw error;
+
+    form.resetFields();
+    setEarnings([]);
+    setDeductions([]);
+    fetchEmployees();
+    fetchStats();
+  } catch (error) {
+    console.error('Save error:', error);
+    message.error('Error saving payroll data: ' + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
+const handleExpensesExport = async () => {
+  try {
+    const csvContent = [
+      ['Label', 'Amount'],
+      ...monthlyExpensesData.map(expense => [expense.label, expense.amount])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Monthly_Expenses_${selectedExpenseMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    message.success('Expenses exported successfully!');
+  } catch (error) {
+    message.error('Error exporting expenses: ' + error.message);
+  }
+};
 
   const handleBulkDownload = async () => {
     try {
@@ -175,44 +807,39 @@ const PayrollManagement = () => {
     )
   `)
   .gte('pay_period', startOfMonth)
-  .lt('pay_period', selectedMonth.add(1, 'month').startOf('month').format('YYYY-MM-DD'));
+  .lt('pay_period', selectedMonth.add(1, 'month').startOf('month').format('YYYY-MM-DD'))
+  .in('user_id', selectedEmployees);
 
 if (error) throw error;
 
-// Flatten the user data into the payroll records
-// Flatten the user data into the payroll records and structure earnings/deductions properly
-// Flatten the user data into the payroll records and structure earnings/deductions properly
 const enrichedPayrollData = payrollData?.map(record => {
-  // Use payroll data first, fallback to user data
   const employeeName = record.employee_name || record.users?.name || 'N/A';
   const employeeId = record.employee_id || record.users?.employee_id || 'N/A';
   const emailAddress = record.email_address || record.users?.email || 'N/A';
   
-  // Structure earnings data as expected by generatePayslipPDF
-  const earningsData = {
-    basic: { label: 'Basic', value: Number(record.basic) || 0 },
-    hra: { label: 'House Rent Allowance', value: Number(record.hra) || 0 }
-  };
+  const earningsData = earnings.map(earning => ({
+  type: earning.key,
+  label: earning.label,
+  amount: form.getFieldValue(earning.key) || 0
+}));
+
+const deductionsData = deductions.map(deduction => ({
+  type: deduction.key, 
+  label: deduction.label,
+  amount: form.getFieldValue(deduction.key) || 0
+}));
   
-  // Structure deductions data as expected by generatePayslipPDF
-  const deductionsData = {
-    incomeTax: { label: 'Income Tax', value: Number(record.income_tax) || 0 },
-    pf: { label: 'Provident Fund', value: Number(record.pf) || 0 }
-  };
-  
-  // Calculate totals (use database calculated values if available)
-  const totalEarnings = Number(record.gross_earnings) || Object.values(earningsData).reduce((sum, item) => sum + (item.value || 0), 0);
-  const totalDeductions = Number(record.total_deductions) || Object.values(deductionsData).reduce((sum, item) => sum + (item.value || 0), 0);
-  const netPay = Number(record.net_pay) || (totalEarnings - totalDeductions);
+  const earningsArray = record.earnings || [];
+const deductionsArray = record.deductions || [];
+const totalEarnings = earningsArray.reduce((sum, item) => sum + (item.amount || 0), 0);
+const totalDeductions = deductionsArray.reduce((sum, item) => sum + (item.amount || 0), 0); // Add this line
+const netPay = Number(record.net_pay) || (totalEarnings - totalDeductions);
 
   return {
-    // Spread original record first
     ...record,
-    // Override with correct employee data
     employee_name: employeeName,
     employee_id: employeeId,
     email_address: emailAddress,
-    // Ensure numeric values are properly converted
     basic: Number(record.basic) || 0,
     hra: Number(record.hra) || 0,
     income_tax: Number(record.income_tax) || 0,
@@ -222,7 +849,6 @@ const enrichedPayrollData = payrollData?.map(record => {
     gross_earnings: totalEarnings,
     total_deductions: totalDeductions,
     net_pay: netPay,
-    // Add the structured data that generatePayslipPDF expects
     earnings_data: earningsData,
     deductions_data: deductionsData,
     total_earnings: totalEarnings
@@ -281,19 +907,14 @@ const enrichedPayrollData = payrollData?.map(record => {
   
   for (const employee of payrollData) {
     try {
-      // Use the same method as individual download - call generatePayslipPDF without returnBlob first
-      // This ensures the employee object gets all the proper data structure
       const pdfBlob = await new Promise((resolve) => {
-        // Create a temporary employee object with proper structure
         const tempEmployee = {
           ...employee,
-          // Ensure all required fields are present
           employee_name: employee.employee_name || employee.users?.name || 'N/A',
           employee_id: employee.employee_id || employee.users?.employee_id || 'N/A',
           email_address: employee.email_address || employee.users?.email || 'N/A'
         };
         
-        // Call generatePayslipPDF with returnBlob = true to get the blob directly
         generatePayslipPDF(tempEmployee, true).then(resolve);
       });
       
@@ -301,7 +922,6 @@ const enrichedPayrollData = payrollData?.map(record => {
       zip.file(fileName, pdfBlob);
     } catch (error) {
       console.error(`Error generating PDF for employee ${employee.employee_name}:`, error);
-      // Continue with other employees even if one fails
     }
   }
   
@@ -315,9 +935,15 @@ const enrichedPayrollData = payrollData?.map(record => {
 };
 
   const addDeduction = () => {
-    const newKey = `deduction_${Date.now()}`;
-    setDeductions([...deductions, { key: newKey, label: '', value: 0 }]);
-  };
+  const newKey = `deduction_${Date.now()}`;
+  const newDeduction = { key: newKey, label: '', value: 0 };
+  setDeductions([...deductions, newDeduction]);
+  
+  // Set initial form value
+  const formValues = form.getFieldsValue();
+  formValues[newKey] = 0;
+  form.setFieldsValue(formValues);
+};
 
   const removeEarning = (index) => {
     if (earnings.length > 1) {
@@ -332,31 +958,43 @@ const enrichedPayrollData = payrollData?.map(record => {
   };
 
   const updateEarning = (index, field, value) => {
-    const updated = [...earnings];
-    updated[index][field] = value;
-    setEarnings(updated);
-    
-    const formValues = form.getFieldsValue();
-    formValues[updated[index].key] = field === 'value' ? value : formValues[updated[index].key];
-    form.setFieldsValue(formValues);
-  };
+  const updated = [...earnings];
+  updated[index][field] = value;
+  setEarnings(updated);
+  
+  // Update the form field value immediately
+  const formValues = form.getFieldsValue();
+  if (field === 'value') {
+    formValues[updated[index].key] = value;
+  } else if (field === 'label') {
+    // Keep the current amount when label changes
+    formValues[updated[index].key] = formValues[updated[index].key] || 0;
+  }
+  form.setFieldsValue(formValues);
+};
 
   const updateDeduction = (index, field, value) => {
-    const updated = [...deductions];
-    updated[index][field] = value;
-    setDeductions(updated);
-    
-    const formValues = form.getFieldsValue();
-    formValues[updated[index].key] = field === 'value' ? value : formValues[updated[index].key];
-    form.setFieldsValue(formValues);
-  };
+  const updated = [...deductions];
+  updated[index][field] = value;
+  setDeductions(updated);
+  
+  // Update the form field value immediately
+  const formValues = form.getFieldsValue();
+  if (field === 'value') {
+    formValues[updated[index].key] = value;
+  } else if (field === 'label') {
+    // Keep the current amount when label changes
+    formValues[updated[index].key] = formValues[updated[index].key] || 0;
+  }
+  form.setFieldsValue(formValues);
+};
 
   const fetchUsers = async () => {
     try {
       const { data, error } = await supabase
         .from('users')
         .select('id, name, employee_id, email, role')
-        .in('role', ['employee', 'hr'])
+        .in('role', ['employee'])
       
       if (error) throw error;
       
@@ -429,7 +1067,8 @@ const enrichedPayrollData = payrollData?.map(record => {
     )
   `)
   .gte('pay_period', startOfMonth)
-  .lt('pay_period', selectedMonth.add(1, 'month').startOf('month').format('YYYY-MM-DD'));
+  .lt('pay_period', selectedMonth.add(1, 'month').startOf('month').format('YYYY-MM-DD'))
+  .in('user_id', selectedEmployees);
 
 if (error) throw error;
 
@@ -479,128 +1118,107 @@ const enrichedPayrollData = payrollData?.map(record => ({
     }
   };
 
-  const fetchStats = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('payroll')
-        .select('net_pay, pay_period');
-      
-      if (error) throw error;
-      
-      const totalEmployees = users.length;
-      const totalPayroll = data.reduce((sum, emp) => sum + (emp.net_pay || 0), 0);
-      const currentMonth = dayjs().format('YYYY-MM');
-      const thisMonth = data
-        .filter(emp => dayjs(emp.pay_period).format('YYYY-MM') === currentMonth)
-        .reduce((sum, emp) => sum + (emp.net_pay || 0), 0);
-      
-      setStats({ totalEmployees, totalPayroll, thisMonth });
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-    }
-  };
-
-  // Professional Dashboard Header with green gradient
-  const renderProfessionalHeader = () => (
-    <div style={{
-  background: 'transparent',
-  padding: '40px 20px',
-  color: '#2d5a4a',
-  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-  borderRadius: '0px',
-}}>
-      <Row gutter={[24, 24]} align="middle">
-        <Col xs={24} md={12}>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
-            <BankOutlined style={{ fontSize: '36px', marginRight: '16px', color: '#0D7139' }} />
-            <div>
-              <Title level={1} style={{ color: '#0D7139', margin: 0, fontSize: 'clamp(24px, 4vw, 32px)' }}>
-  Payroll Management
-</Title>
-<Text style={{ color: 'black', fontSize: '16px' }}>
-  Professional payroll processing made simple
-</Text>
-            </div>
-          </div>
-        </Col>
-        <Col xs={24} md={12}>
-          <Row gutter={16}>
-            <Col xs={8} sm={8}>
-              <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #caf0c7ff 0%, #caf0c7ff 100%)',
-border: '1px solid #0D7139', borderRadius: '8px' }}>
-                <TeamOutlined style={{ fontSize: '24px', marginBottom: '8px', color: '#0D7139' }} />
-                <div style={{ fontSize: '20px', fontWeight: 'bold' }}>{stats.totalEmployees}</div>
-                <div style={{ fontSize: '12px', opacity: 0.8 }}>Employees</div>
-              </div>
-            </Col>
-            <Col xs={8} sm={8}>
-              <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #caf0c7ff 0%, #caf0c7ff 100%)',
-border: '1px solid #0D7139', borderRadius: '8px' }}>
-                <BankOutlined style={{ fontSize: '24px', marginBottom: '8px', color: '#0D7139' }} />
-                <div style={{ fontSize: '20px', fontWeight: 'bold' }}>₹{stats.totalPayroll.toLocaleString()}</div>
-                <div style={{ fontSize: '12px', opacity: 0.8 }}>Total Payroll</div>
-              </div>
-            </Col>
-            <Col xs={8} sm={8}>
-              <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #caf0c7ff 0%, #caf0c7ff 100%)',
-border: '1px solid #0D7139', borderRadius: '8px' }}>
-                <DashboardOutlined style={{ fontSize: '24px', marginBottom: '8px', color: '#0D7139' }} />
-                <div style={{ fontSize: '20px', fontWeight: 'bold' }}>₹{stats.thisMonth.toLocaleString()}</div>
-                <div style={{ fontSize: '12px', opacity: 0.8 }}>This Month</div>
-              </div>
-            </Col>
-          </Row>
-        </Col>
-      </Row>
-    </div>
-  );
-
-  // Professional Action Cards with green accents
-  const renderActionCards = () => (
-    <div style={{ padding: '30px 20px', background: 'transparent', borderBottom: '1px solid #e2e8f0', }}>
-      <Row gutter={[24, 24]}>
-        
-        <Col xs={24} sm={12} lg={6}>
-          <Card 
-            hoverable
-            style={{ 
-              textAlign: 'center', 
-              border: '1px solid #e2e8f0',
-              borderRadius: '12px',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-            }}
-            onClick={() => setBulkDownloadVisible(true)}
-          >
-            <DownloadOutlined style={{ fontSize: '32px', color: '#059669', marginBottom: '12px' }} />
-            <div style={{ fontWeight: '600', fontSize: '16px', marginBottom: '4px' }}>Bulk Download</div>
-            <div style={{ color: '#64748b', fontSize: '14px' }}>Generate all payslips</div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card 
-            hoverable
-            style={{ 
-              textAlign: 'center', 
-              border: '1px solid #e2e8f0',
-              borderRadius: '12px',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-            }}
-            onClick={() => setEmailOnlyVisible(true)}
-          >
-            <SendOutlined style={{ fontSize: '32px', color: '#065f46', marginBottom: '12px' }} />
-            <div style={{ fontWeight: '600', fontSize: '16px', marginBottom: '4px' }}>Email Only</div>
-            <div style={{ color: '#64748b', fontSize: '14px' }}>Send to all employees</div>
-          </Card>
-        </Col>
-      </Row>
-    </div>
-  );
+  
 
   const generatePayslipPDF = async (employee, returnBlob = false) => {
-  // Debug log to see what data we're getting
   console.log('PDF Generation - Employee data:', employee);
   
-  // Ensure we have the required fields with proper fallbacks
+  // Calculate totals from JSONB arrays
+  const earningsArray = Array.isArray(employee.earnings) ? 
+  employee.earnings : 
+  (employee.earnings_data || [])
+  const deductionsArray = Array.isArray(employee.deductions) ? 
+  employee.deductions : 
+  (employee.deductions_data || []);
+  
+  const totalEarnings = earningsArray.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const totalDeductions = deductionsArray.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const netPay = totalEarnings - totalDeductions;
+  const saveMonthlyExpenses = async (expenses) => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    const { data: existing, error: fetchError } = await supabase
+      .from('monthly_expenses')
+      .select('id')
+      .eq('month_year', currentMonth)
+      .maybeSingle();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    
+    if (existing) {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .update({ 
+          expenses: expenses,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+      
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .insert({
+          month_year: currentMonth,
+          expenses: expenses,
+          this_month_payroll: thisMonthPayroll,
+          is_payroll_edited: false
+        });
+      
+      if (error) throw error;
+    }
+    
+    message.success('Monthly expenses saved successfully!');
+    fetchStats();
+  } catch (error) {
+    message.error('Error saving expenses: ' + error.message);
+  }
+};
+
+const saveEditedPayroll = async (amount) => {
+  try {
+    const currentMonth = dayjs().format('YYYY-MM');
+    
+    const { data: existing, error: fetchError } = await supabase
+      .from('monthly_expenses')
+      .select('id')
+      .eq('month_year', currentMonth)
+      .maybeSingle();
+    
+    if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+    
+    if (existing) {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .update({ 
+          this_month_payroll: amount,
+          is_payroll_edited: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existing.id);
+      
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from('monthly_expenses')
+        .insert({
+          month_year: currentMonth,
+          expenses: monthlyExpensesData,
+          this_month_payroll: amount,
+          is_payroll_edited: true
+        });
+      
+      if (error) throw error;
+    }
+    
+    message.success('This month payroll updated successfully!');
+    setPayrollEditModalVisible(false);
+    fetchStats();
+  } catch (error) {
+    message.error('Error updating payroll: ' + error.message);
+  }
+};
   const employeeData = {
     employee_name: employee.employee_name || employee.users?.name || 'N/A',
     employee_id: employee.employee_id || employee.users?.employee_id || 'N/A', 
@@ -611,10 +1229,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
     pay_date: employee.pay_date,
     paid_days: Number(employee.paid_days) || 0,
     lop_days: Number(employee.lop_days) || 0,
-    basic: Number(employee.basic) || 0,
-    hra: Number(employee.hra) || 0,
-    income_tax: Number(employee.income_tax) || 0,
-    pf: Number(employee.pf) || 0,
     gender: employee.gender || 'N/A',
     designation: employee.designation || 'N/A',
     transaction_id: employee.transaction_id || 'N/A',
@@ -624,25 +1238,9 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
     uan_number: employee.uan_number || '-',
     esi_number: employee.esi_number || '-'
   };
-  
-  const earningsData = employee.earnings_data || {
-    basic: { label: 'Basic', value: employeeData.basic },
-    hra: { label: 'House Rent Allowance', value: employeeData.hra }
-  };
-  
-  const deductionsData = employee.deductions_data || {
-    incomeTax: { label: 'Income Tax', value: employeeData.income_tax },
-    pf: { label: 'Provident Fund', value: employeeData.pf }
-  };
-  
-  const totalEarnings = employee.total_earnings || Object.values(earningsData).reduce((sum, item) => sum + (item.value || 0), 0);
-  const totalDeductions = employee.total_deductions || Object.values(deductionsData).reduce((sum, item) => sum + (item.value || 0), 0);
-  const netPay = employee.net_pay || (totalEarnings - totalDeductions);
 
-  // Function to convert number to words (simplified version)
   const numberToWords = (num) => {
     if (num === 0) return "Zero";
-    // This is a simplified version - you might want to use a proper number-to-words library
     return `${num.toLocaleString('en-IN')} Only`;
   };
     
@@ -658,7 +1256,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
     
     <div style="max-width: 800px; margin: 0 auto; background-color: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
         
-        <!-- Header -->
         <div style="background-color: white; padding: 20px; border-bottom: 1px solid #e0e0e0;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start;">
                 <div style="flex: 1;">
@@ -679,7 +1276,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             </div>
         </div>
 
-        <!-- Employee Summary and Net Pay -->
         <div style="display: flex; padding: 20px; gap: 20px;">
             <div style="flex: 1;">
                 <h3 style="margin: 0 0 15px 0; font-size: 14px; color: #666; font-weight: normal;">EMPLOYEE SUMMARY</h3>
@@ -705,7 +1301,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
                 </div>
             </div>
             
-            <!-- Net Pay Box -->
             <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; min-width: 200px; overflow: hidden;">
                 <div style="padding: 20px; position: relative;">
                     <div style="position: absolute; top: 0; left: 0; right: 0; height: 85px; background-color: #e8f5e8;"></div>
@@ -730,7 +1325,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             </div>
         </div>
 
-        <!-- Employee Details -->
         <div style="display: flex; padding: 0 20px 20px 20px; gap: 40px;">
             <div style="flex: 1;">
                 <div style="margin-bottom: 12px;">
@@ -777,21 +1371,19 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             </div>
         </div>
 
-        <!-- Earnings and Deductions Table -->
         <div style="margin: 20px; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; background-color: white;">
             <div style="display: flex;">
-                <!-- Earnings -->
                 <div style="flex: 1; padding: 20px;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px dotted #ddd;">
                         <span style="font-size: 14px; font-weight: bold; color: #333;">EARNINGS</span>
                         <span style="font-size: 14px; font-weight: bold; color: #333;">AMOUNT</span>
                     </div>
                     
-                    ${Object.values(earningsData).map(item => 
+                    ${earningsArray.map(item => 
                         `<div style="margin-bottom: 15px;">
                             <div style="display: flex; justify-content: space-between;">
                                 <span style="font-size: 13px; color: #333;">${item.label}</span>
-                                <span style="font-size: 13px; color: #333; font-weight: 600;">Rs.${item.value.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                                <span style="font-size: 13px; color: #333; font-weight: 600;">Rs.${(item.amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                             </div>
                         </div>`
                     ).join('')}
@@ -804,18 +1396,17 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
                     </div>
                 </div>
 
-                <!-- Deductions -->
                 <div style="flex: 1; padding: 20px; border-left: 1px solid #e0e0e0;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px dotted #ddd;">
                         <span style="font-size: 14px; font-weight: bold; color: #333;">DEDUCTIONS</span>
                         <span style="font-size: 14px; font-weight: bold; color: #333;">AMOUNT</span>
                     </div>
                     
-                    ${Object.values(deductionsData).map(item => 
+                    ${deductionsArray.map(item => 
                         `<div style="margin-bottom: 15px;">
                             <div style="display: flex; justify-content: space-between;">
                                 <span style="font-size: 13px; color: #333;">${item.label}</span>
-                                <span style="font-size: 13px; color: #333; font-weight: 600;">Rs.${item.value.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
+                                <span style="font-size: 13px; color: #333; font-weight: 600;">Rs.${(item.amount || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}</span>
                             </div>
                         </div>`
                     ).join('')}
@@ -830,7 +1421,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             </div>
         </div>
 
-        <!-- Total Net Payable -->
         <div style="margin: 20px; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden; background-color: white;">
             <div style="padding: 20px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -845,7 +1435,6 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             </div>
         </div>
         
-        <!-- Amount in Words -->
         <div style="margin: 0 20px 20px 20px; text-align: center;">
             <div style="font-size: 12px; color: #666;">Amount In Words : Indian Rupee ${numberToWords(netPay)}</div>
         </div>
@@ -856,426 +1445,557 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
 </html>
   `;
 
+  // Generate PDF blob
+  const pdfBlob = await new Promise((resolve) => {
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlContent;
+    tempDiv.style.position = 'absolute';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.width = '800px';
+    tempDiv.style.background = 'white';
+    document.body.appendChild(tempDiv);
+    
+    html2canvas(tempDiv, {
+  scale: 1.5, // Reduce from 2 to 1.5
+  useCORS: true,
+  allowTaint: true,
+  backgroundColor: '#ffffff',
+  logging: false, // Disable logging for better performance
+  imageTimeout: 30000
+}).then(canvas => {
+  document.body.removeChild(tempDiv);
+  
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const imgData = canvas.toDataURL('image/jpeg', 0.8); // Use JPEG with 80% quality instead of PNG
+  
+  const pdfWidth = pdf.internal.pageSize.getWidth();
+  const pdfHeight = pdf.internal.pageSize.getHeight();
+  const imgWidth = canvas.width;
+  const imgHeight = canvas.height;
+  const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+  const imgX = (pdfWidth - imgWidth * ratio) / 2;
+  const imgY = 0;
+  
+  pdf.addImage(imgData, 'JPEG', imgX, imgY, imgWidth * ratio, imgHeight * ratio); // Use JPEG
+  const blob = pdf.output('blob');
+  resolve(blob);
+}).catch(error => {
+  document.body.removeChild(tempDiv);
+  console.error('Error generating PDF:', error);
+  resolve(new Blob());
+});
+  });
 
-    if (returnBlob) {
-      return new Promise((resolve) => {
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = htmlContent;
-        tempDiv.style.position = 'absolute';
-        tempDiv.style.left = '-9999px';
-        tempDiv.style.width = '800px';
-        tempDiv.style.background = 'white';
-        document.body.appendChild(tempDiv);
-        
-        html2canvas(tempDiv, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff'
-        }).then(canvas => {
-          document.body.removeChild(tempDiv);
-          
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const imgData = canvas.toDataURL('image/png');
-          
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = pdf.internal.pageSize.getHeight();
-          const imgWidth = canvas.width;
-          const imgHeight = canvas.height;
-          const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
-          const imgX = (pdfWidth - imgWidth * ratio) / 2;
-          const imgY = 0;
-          
-          pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
-          const blob = pdf.output('blob');
-          resolve(blob);
-        }).catch(error => {
-          document.body.removeChild(tempDiv);
-          console.error('Error generating PDF:', error);
-          resolve(new Blob()); // Return empty blob on error
-        });
-      });
-    } else {
-      // For email sending, we also need blob
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = htmlContent;
-      tempDiv.style.position = 'absolute';
-      tempDiv.style.left = '-9999px';
-      tempDiv.style.width = '800px';
-      tempDiv.style.background = 'white';
-      document.body.appendChild(tempDiv);
-      
-      return new Promise((resolve) => {
-        html2canvas(tempDiv, {
-          scale: 2,
-          useCORS: true,
-          allowTaint: true,
-          backgroundColor: '#ffffff'
-        }).then(canvas => {
-          document.body.removeChild(tempDiv);
-          
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const imgData = canvas.toDataURL('image/png');
-          
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = pdf.internal.pageSize.getHeight();
-          const imgWidth = canvas.width;
-          const imgHeight = canvas.height;
-          const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
-          const imgX = (pdfWidth - imgWidth * ratio) / 2;
-          const imgY = 0;
-          
-          pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
-          
-          // For print dialog
-          const printWindow = window.open('', '_blank');
-          printWindow.document.write(htmlContent);
-          printWindow.document.close();
-          printWindow.onload = function() {
-            printWindow.print();
-            printWindow.onafterprint = function() {
-              printWindow.close();
-            };
-          };
-          
-          // Return blob for email
-          const blob = pdf.output('blob');
-          resolve(blob);
-        });
-      });
-    }
+  // When PDF is generated successfully and returnBlob is true, store PDF in Supabase Storage
+  try {
+  const uploadResult = await uploadPDFToStorage(pdfBlob, employee);
+  
+  // Add to final_payslips array for tracking generated payslips
+  const currentFinalPayslips = employee.final_payslips || [];
+  const payslipEntry = {
+    month: dayjs(employee.pay_period).format('YYYY-MM'),
+    amount: netPay,
+    generated_at: new Date().toISOString(),
+    pdf_url: uploadResult.url
   };
+  
+  // Remove existing entry for same month if exists, then add new one
+  const updatedFinalPayslips = [
+    ...currentFinalPayslips.filter(p => p.month !== payslipEntry.month),
+    payslipEntry
+  ];
+  
+  // Store PDF URL and update final_payslips in payroll table
+  await supabase
+    .from('payroll')
+    .update({ 
+      pdf_url: uploadResult.url,
+      pdf_filename: uploadResult.fileName,
+      final_payslips: updatedFinalPayslips
+    })
+    .eq('id', employee.id);
+    
+  console.log('PDF stored and URL saved to database');
+  
+} catch (error) {
+  console.error('Error storing PDF:', error);
+  message.error('PDF generated but failed to store: ' + error.message);
+}
+
+// Handle the return type based on returnBlob parameter
+if (returnBlob) {
+  return pdfBlob;
+} else {
+  // For non-blob generation (preview/print)
+  const printWindow = window.open('', '_blank');
+if (printWindow) {
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+  printWindow.onload = function() {
+    printWindow.print();
+    printWindow.onafterprint = function() {
+      printWindow.close();
+    };
+  };
+} else {
+  // If popup is blocked, create a downloadable PDF instead
+  const url = URL.createObjectURL(pdfBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `payslip_${employee.employee_name}_${dayjs(employee.pay_period).format('YYYY-MM')}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+  
+  return pdfBlob;
+}
+};
   
   const onFinish = async (values) => {
-    try {
-      setLoading(true);
-      
-      const { data, error } = await supabase
+  try {
+    setLoading(true);
+    
+    const payPeriodFormatted = values.payPeriod.format('YYYY-MM-DD');
+    const payDateFormatted = values.payDate.format('YYYY-MM-DD');
+
+    // Create earningsData and deductionsData from state
+    const earningsData = earnings.map(earning => ({
+      type: earning.key,
+      label: earning.label,
+      amount: form.getFieldValue(earning.key) || 0
+    }));
+
+    const deductionsData = deductions.map(deduction => ({
+      type: deduction.key, 
+      label: deduction.label,
+      amount: form.getFieldValue(deduction.key) || 0
+    }));
+
+    // Check if record already exists for this employee and pay period
+    const { data: existingRecord, error: checkError } = await supabase
+      .from('payroll')
+      .select('id')
+      .eq('user_id', values.userId)
+      .eq('pay_period', payPeriodFormatted)
+      .maybeSingle(); // Changed from .single() to .maybeSingle()
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      throw checkError;
+    }
+
+    const payrollData = {
+      company_name: values.companyName,
+      company_address: values.companyAddress,
+      city: values.city,
+      country: values.country,
+      employee_name: values.employeeName,
+      employee_id: values.employeeId,
+      email_address: values.emailAddress,
+      pay_period: payPeriodFormatted,
+      pay_date: payDateFormatted,
+      paid_days: values.paidDays,
+      lop_days: values.lopDays,
+      user_id: values.userId,
+      gender: values.gender,
+      designation: values.designation,
+      transaction_id: values.transactionId,
+      pan_number: values.panNumber,
+      employee_bank: values.employeeBank,
+      bank_account: values.bankAccount,
+      uan_number: values.uanNumber,
+      esi_number: values.esiNumber,
+      earnings: earningsData,
+      deductions: deductionsData,
+    };
+
+    let data, error;
+
+    if (existingRecord) {
+      // Update existing record
+      const { data: updateData, error: updateError } = await supabase
         .from('payroll')
-        .insert([{
-          company_name: values.companyName,
-          company_address: values.companyAddress,
-          city: values.city,
-          country: values.country,
-          employee_name: values.employeeName,
-          employee_id: values.employeeId,
-          email_address: values.emailAddress,
-          pay_period: values.payPeriod.format('YYYY-MM-DD'),
-          pay_date: values.payDate.format('YYYY-MM-DD'),
-          paid_days: values.paidDays,
-          lop_days: values.lopDays,
-          user_id: values.userId,
-          basic: values.basic || 0,
-          hra: values.hra || 0,
-          income_tax: values.incomeTax || 0,
-          pf: values.pf || 0
-        }])
+        .update(payrollData)
+        .eq('id', existingRecord.id)
         .select();
 
-      if (error) throw error;
+      data = updateData;
+      error = updateError;
+    } else {
+      // Insert new record
+      const { data: insertData, error: insertError } = await supabase
+        .from('payroll')
+        .insert([payrollData])
+        .select();
 
-      if (data && data[0]) {
-        if (submitAction === 'pdf') {
-          // Generate and show PDF
-          await generatePayslipPDF(data[0]);
-          message.success('Employee added and PDF generated successfully!');
-        } else if (submitAction === 'email') {
-          // Generate PDF blob and send email
-          const pdfBlob = await generatePayslipPDF(data[0], true);
-          await sendPayslipEmail(data[0], pdfBlob);
-          message.success('Employee added and email sent successfully!');
-        } else {
-          message.success('Employee added successfully!');
-        }
-      }
-
-      setCurrentView('dashboard');
-      form.resetFields();
-      fetchEmployees();
-      fetchStats();
-    } catch (error) {
-      message.error('Error: ' + error.message);
-    } finally {
-      setLoading(false);
-      setSubmitAction('save'); // Reset action
+      data = insertData;
+      error = insertError;
     }
-  };
+
+    if (error) throw error;
+
+    if (data && data[0]) {
+  if (submitAction === 'pdf') {
+    await generatePayslipPDF(data[0], true); // <-- Add true here
+    message.success('Payroll updated and PDF generated successfully!');
+    fetchStats(); // Refresh stats after PDF generation
+  } else if (submitAction === 'email') {
+    const pdfBlob = await generatePayslipPDF(data[0], true);
+    await sendPayslipEmail(data[0], pdfBlob);
+    message.success('Payroll updated and email sent successfully!');
+    fetchStats(); // Refresh stats after PDF generation
+  } else {
+    message.success('Payroll saved successfully!');
+  }
+}
+
+    setCurrentView('dashboard');
+    form.resetFields();
+    setEarnings([]);
+    setDeductions([]);
+    fetchEmployees();
+    fetchStats();
+  } catch (error) {
+    console.error('Error:', error);
+    message.error('Error: ' + error.message);
+  } finally {
+    setLoading(false);
+    setSubmitAction('save');
+  }
+};
+
 
   const getMergedEmployeeData = () => {
-    return users.map(user => {
-      // Find the latest payroll record for this user
-      const latestPayroll = employees
-        .filter(emp => emp.user_id === user.id)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-      
-      return {
-        ...user,
-        pay_period: latestPayroll?.pay_period || null,
-        net_pay: latestPayroll?.net_pay || 0,
-        pay_date: latestPayroll?.pay_date || null,
-        hasPayroll: !!latestPayroll
-      };
-    });
-  };
-
-  const renderDashboard = () => (
-    <>
-      {renderProfessionalHeader()}
-<div style={{ marginTop: '24px' }}>
-  {renderActionCards()}
-</div>
-      
-     <div style={{ padding: '30px 20px', background: 'transparent', minHeight: 'calc(100vh - 300px)' }}>
-        <style>
-          {`.ant-input:hover,
-.ant-input:focus,
-.ant-input-focused {
-  border-color: #0D7139 !important;
-}
-
-.ant-input:focus,
-.ant-input-focused {
-  box-shadow: 0 0 0 2px rgba(13, 113, 57, 0.2) !important;
-}
-
-.ant-select:hover .ant-select-selector,
-.ant-select-focused .ant-select-selector,
-.ant-select-selector:focus {
-  border-color: #0D7139 !important;
-}
-
-.ant-select-focused .ant-select-selector {
-  box-shadow: 0 0 0 2px rgba(13, 113, 57, 0.2) !important;
-}
-
-.ant-input-number:hover,
-.ant-input-number:focus,
-.ant-input-number-focused {
-  border-color: #0D7139 !important;
-}
-
-.ant-input-number:focus,
-.ant-input-number-focused {
-  box-shadow: 0 0 0 2px rgba(13, 113, 57, 0.2) !important;
-
-  
-}`}
-        </style>
-        {employees.length === 0 ? (
-          <Card style={{ 
-            textAlign: 'center', 
-            padding: '60px 20px',
-            border: '2px dashed #e2e8f0',
-            borderRadius: '12px',
-            background: '#fafbfc'
-          }}>
-            <TeamOutlined style={{ fontSize: '64px', color: '#cbd5e1', marginBottom: '24px' }} />
-            <Title level={2} style={{ color: '#475569', marginBottom: '16px', fontSize: 'clamp(20px, 3vw, 28px)' }}>
-              No Employees Added Yet
-            </Title>
-            <Text style={{ color: '#64748b', fontSize: '16px', marginBottom: '32px', display: 'block' }}>
-              Get started by adding your first employee to the payroll system.
-            </Text>
-            <Button 
-              type="primary" 
-              size="large" 
-              icon={<PlusOutlined />}
-              onClick={() => setCurrentView('addEmployee')}
-              style={{ 
-                background: '#10b981', 
-                borderColor: '#10b981',
-                height: '48px',
-                fontSize: '16px',
-                borderRadius: '8px',
-                paddingLeft: '32px',
-                paddingRight: '32px'
-              }}
-            >
-              Add First Employee
-            </Button>
-          </Card>
-        ) : (
-          <Card style={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
-            <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-              <Title level={3} style={{ margin: 0, color: '#1e293b' }}>Employee Payroll Records</Title>
-              <Space wrap>
-                <Button icon={<DownloadOutlined />} style={{ borderRadius: '6px' }}>
-                  Export CSV
-                </Button>
-                <Button 
-                  type="primary" 
-                  icon={<PlusOutlined />} 
-                  onClick={() => setCurrentView('addEmployee')} 
-                  style={{ 
-                    borderRadius: '6px',
-                    background: '#10b981',
-                    borderColor: '#10b981'
-                  }}
-                >
-                  Add Employee
-                </Button>
-              </Space>
-            </div>
-            <Table
-              dataSource={getMergedEmployeeData()}
-              rowKey="id"
-              loading={loading}
-              scroll={{ x: 800 }}
-              pagination={{
-                pageSize: 10,
-                showSizeChanger: true,
-                showQuickJumper: true,
-               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} employees`,
-                 itemRender: (current, type, originalElement) => {
-    if (type === 'page') {
-      return (
-        <a style={{ 
-          color: '#000000d9', 
-          backgroundColor: 'white',
-          border: '1px solid #d9d9d9'
-        }}>
-          {current}
-        </a>
-      );
-    }
-    return originalElement;
-  }   
-              }}
-              columns={[
-                {
-                  title: 'Employee',
-                  key: 'employee',
-                  render: (_, record) => (
-                    <div>
-                      <div style={{ fontWeight: '600', color: '#1e293b' }}>{record.name}</div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>ID: {record.employee_id}</div>
-                    </div>
-                  ),
-                  responsive: ['xs', 'sm', 'md', 'lg']
-                },
-                {
-                  title: 'Email',
-                  dataIndex: 'email',
-                  key: 'email',
-                  responsive: ['sm', 'md', 'lg']
-                },
-                {
-                  title: 'Role',
-                  dataIndex: 'role',
-                  key: 'role',
-                  render: (role) => (
-                    <span style={{ 
-                      padding: '4px 8px', 
-                      borderRadius: '4px', 
-                      background: role === 'hr' ? '#e6f7ff' : '#f0f9f4',
-                      color: role === 'hr' ? '#1890ff' : '#059669',
-                      fontSize: '12px',
-                      fontWeight: '500'
-                    }}>
-                      {role.toUpperCase()}
-                    </span>
-                  ),
-                  responsive: ['md', 'lg']
-                },
-                {
-                  title: 'Pay Period',
-                  dataIndex: 'pay_period',
-                  key: 'pay_period',
-                  render: (date) => dayjs(date).format('MMM YYYY'),
-                  responsive: ['md', 'lg']
-                },
-                {
-                  title: 'Net Pay',
-                  dataIndex: 'net_pay',
-                  key: 'net_pay',
-                  render: (amount) => (
-                    <span style={{ fontWeight: '600', color: '#059669' }}>
-                      ₹{amount?.toLocaleString() || 0}
-                    </span>
-                  ),
-                  responsive: ['xs', 'sm', 'md', 'lg']
-                },
-                {
-                  title: 'Actions',
-                  key: 'actions',
-                  render: (_, record) => (
-                    <Space wrap>
-                      <Button 
-                        type="primary" 
-                        size="small"
-                        icon={<PlusOutlined />}
-                        onClick={() => {
-    // Find the latest payroll record for this user
+  return users.map(user => {
     const latestPayroll = employees
-      .filter(emp => emp.user_id === record.id)
+      .filter(emp => emp.user_id === user.id)
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
     
-    // Set form values with existing payroll data if available
-    const formValues = {
-      userId: record.id,
-      employeeName: record.name,
-      employeeId: record.employee_id,
-      emailAddress: record.email,
-      // Reset pay period and pay date to current defaults
-      payPeriod: dayjs(),
-      payDate: dayjs(),
-    };
-    
-    // If payroll data exists, populate other fields
+    // NEW LOGIC: Priority for net_pay calculation
+    let netPay = 0;
     if (latestPayroll) {
-      formValues.companyName = latestPayroll.company_name;
-      formValues.companyAddress = latestPayroll.company_address;
-      formValues.city = latestPayroll.city;
-      formValues.country = latestPayroll.country;
-      formValues.paidDays = latestPayroll.paid_days;
-      formValues.lopDays = latestPayroll.lop_days;
-      formValues.basic = latestPayroll.basic;
-      formValues.hra = latestPayroll.hra;
-      formValues.incomeTax = latestPayroll.income_tax;
-      formValues.pf = latestPayroll.pf;
+      // First priority: Check final_payslips for most recent amount
+      if (latestPayroll.final_payslips && Array.isArray(latestPayroll.final_payslips) && latestPayroll.final_payslips.length > 0) {
+        // Get the most recent payslip (sorted by month or generated_at)
+        const sortedPayslips = latestPayroll.final_payslips.sort((a, b) => 
+          new Date(b.generated_at || b.month) - new Date(a.generated_at || a.month)
+        );
+        netPay = sortedPayslips[0].amount || 0;
+      } else {
+        // Second priority: Calculate from earnings if no final_payslips
+        const earnings = Array.isArray(latestPayroll.earnings) ? latestPayroll.earnings : [];
+        netPay = earnings.reduce((sum, earning) => sum + (earning.amount || 0), 0);
+      }
     }
     
-    form.setFieldsValue(formValues);
-    setCurrentView('addEmployee');
-  }}  
-                        style={{ 
-                          borderRadius: '6px',
-                          background: '#10b981',
-                          borderColor: '#10b981'
+    return {
+      ...user,
+      pay_period: latestPayroll?.pay_period || null,
+      net_pay: netPay,
+      pay_date: latestPayroll?.pay_date || null,
+      hasPayroll: !!latestPayroll
+    };
+  });
+};
+
+  // NEW: Professional Dashboard Component
+  const renderDashboard = () => (
+    <div style={{ background: '#f7fafc', minHeight: '100vh', padding: '24px' }}>
+      <style>
+        {`
+          .ant-btn-primary { background: #10b981; border-color: #10b981; }
+          .ant-btn-primary:hover { background: #059669; border-color: #059669; }
+          .ant-table-thead > tr > th { background: #f8f9fa !important; color: #475569; font-weight: 600; }
+          .ant-table-tbody > tr > td { border-bottom: 1px solid #e2e8f0; }
+          .ant-table-tbody > tr:hover > td { background: #f8f9fa; }
+          .ant-card { border: 1px solid #e2e8f0; }
+          .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease;
+          }
+          .stat-card:hover {
+             transform: translateY(-5px);
+             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+          }
+        `}
+      </style>
+
+      {/* Header */}
+      <div style={{ marginBottom: '24px' }}>
+        <Row gutter={[24, 24]} align="middle">
+          <Col flex="auto">
+            <Title level={2} style={{ margin: 0, color: '#1e293b' }}>
+              Payroll Dashboard
+            </Title>
+            <Text type="secondary" style={{ fontSize: '16px' }}>
+              Manage your employee payroll efficiently.
+            </Text>
+          </Col>
+        </Row>
+      </div>
+
+      {/* Stats Cards */}
+      <Row gutter={[24, 24]} style={{ marginBottom: '24px' }}>
+        <Col xs={24} sm={8}>
+  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setExpensesModalVisible(true)}>
+    <Space align="start" style={{ width: '100%', justifyContent: 'space-between' }}>
+      <div style={{ 
+        background: '#e6f7ff', 
+        color: '#1890ff',
+        padding: '12px',
+        borderRadius: '8px',
+        fontSize: '24px'
+      }}>
+        <PlusOutlined />
+      </div>
+      <div>
+        <Text type="secondary">Monthly Expenses</Text>
+        <Title level={3} style={{ margin: 0 }}>
+          ₹{monthlyExpensesData.reduce((sum, exp) => sum + (exp.amount || 0), 0).toLocaleString()}
+        </Title>
+      </div>
+    </Space>
+  </div>
+</Col>
+<Col xs={24} sm={8}>
+  <div className="stat-card" style={{ cursor: 'pointer' }} onClick={() => setPayrollEditModalVisible(true)}>
+    <Space align="start" style={{ width: '100%', justifyContent: 'space-between' }}>
+      <div style={{ 
+        background: '#f6ffed', 
+        color: '#52c41a',
+        padding: '12px',
+        borderRadius: '8px',
+        fontSize: '24px'
+      }}>
+        {isPayrollEdited ? <EditOutlined /> : <DashboardOutlined />}
+      </div>
+      <div>
+        <Text type="secondary">This Month's Payroll {isPayrollEdited && <span style={{color: '#52c41a'}}>(Edited)</span>}</Text>
+        <Title level={3} style={{ margin: 0 }}>₹{thisMonthPayroll.toLocaleString()}</Title>
+      </div>
+    </Space>
+  </div>
+</Col>
+        <Col xs={24} sm={8}>
+          <div className="stat-card">
+            <Space align="start" style={{ width: '100%', justifyContent: 'space-between' }}>
+              <div style={{ 
+                background: '#fffbe6', 
+                color: '#faad14',
+                padding: '12px',
+                borderRadius: '8px',
+                fontSize: '24px'
+              }}>
+                <BankOutlined />
+              </div>
+              <div>
+                <Text type="secondary">Total Payroll</Text>
+                <Title level={3} style={{ margin: 0 }}>₹{stats.totalPayroll.toLocaleString()}</Title>
+              </div>
+            </Space>
+          </div>
+        </Col>
+        
+      </Row>
+
+      {/* Main Content */}
+      {employees.length === 0 ? (
+        <Card style={{ 
+          textAlign: 'center', 
+          padding: '60px 20px',
+          border: '2px dashed #e2e8f0',
+          borderRadius: '12px',
+          background: '#fafbfc'
+        }}>
+          <TeamOutlined style={{ fontSize: '64px', color: '#cbd5e1', marginBottom: '24px' }} />
+          <Title level={2} style={{ color: '#475569', marginBottom: '16px' }}>
+            No Payroll Records Found
+          </Title>
+          <Text style={{ color: '#64748b', fontSize: '16px', marginBottom: '32px', display: 'block' }}>
+            Get started by adding your first employee to the payroll system.
+          </Text>
+          <Button 
+            type="primary" 
+            size="large" 
+            icon={<PlusOutlined />}
+            onClick={() => setCurrentView('addEmployee')}
+          >
+            Add First Employee
+          </Button>
+        </Card>
+      ) : (
+        <Card style={{ borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
+          <div style={{ marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+            <Title level={4} style={{ margin: 0, color: '#1e293b' }}>Employee Records</Title>
+            <Space wrap>
+  <Button icon={<DownloadOutlined />} onClick={() => {
+    setBulkActionType('download');
+    setBulkDownloadVisible(true);
+  }}>
+    Bulk Download
+  </Button>
+  <Button icon={<SendOutlined />} onClick={() => {
+    setBulkActionType('email');
+    setBulkDownloadVisible(true);
+  }}>
+    Bulk Email
+  </Button>
+  <Button icon={<DownloadOutlined />} onClick={() => {
+    setBulkActionType('excel');
+    setBulkDownloadVisible(true);
+  }}>
+    Export Excel
+  </Button>
+  <Button 
+    type="primary" 
+    icon={<PlusOutlined />} 
+    onClick={() => setCurrentView('addEmployee')} 
+  >
+    Add Payroll
+  </Button>
+</Space>  
+          </div>
+          <Table
+            dataSource={getMergedEmployeeData()}
+            rowKey="id"
+            loading={loading}
+            rowSelection={{
+    selectedRowKeys: selectedEmployees,
+    onChange: setSelectedEmployees,
+    type: 'checkbox',
+  }}
+            scroll={{ x: 800 }}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} employees`,
+            }}
+            columns={[
+              {
+                title: 'Employee',
+                key: 'employee',
+                render: (_, record) => (
+                  <div>
+                    <div style={{ fontWeight: '600', color: '#1e293b' }}>{record.name}</div>
+                    <div style={{ fontSize: '12px', color: '#64748b' }}>ID: {record.employee_id}</div>
+                  </div>
+                ),
+              },
+              {
+                title: 'Email',
+                dataIndex: 'email',
+                key: 'email',
+                responsive: ['sm'],
+              },
+              {
+                title: 'Role',
+                dataIndex: 'role',
+                key: 'role',
+                render: (role) => (
+                  <span style={{ 
+                    padding: '4px 8px', 
+                    borderRadius: '4px', 
+                    background: role === 'hr' ? '#e6f7ff' : '#f0f9f4',
+                    color: role === 'hr' ? '#1890ff' : '#059669',
+                    fontSize: '12px',
+                    fontWeight: '500'
+                  }}>
+                    {role.toUpperCase()}
+                  </span>
+                ),
+                responsive: ['md'],
+              },
+              {
+                title: 'Last Pay Period',
+                dataIndex: 'pay_period',
+                key: 'pay_period',
+                render: (date) => date ? dayjs(date).format('MMM YYYY') : 'N/A',
+                responsive: ['lg'],
+              },
+              {
+                title: 'Last Net Pay',
+                dataIndex: 'net_pay',
+                key: 'net_pay',
+                render: (amount) => (
+                  <span style={{ fontWeight: '600', color: '#059669' }}>
+                    ₹{amount?.toLocaleString() || 0}
+                  </span>
+                ),
+              },
+              {
+                title: 'Actions',
+                key: 'actions',
+                align: 'right',
+                render: (_, record) => (
+                  <Space>
+                    <Button 
+                      size="small"
+                      icon={<PlusOutlined />}
+                      onClick={() => {
+                        const latestPayroll = employees
+                          .filter(emp => emp.user_id === record.id)
+                          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+                        
+                        const formValues = {
+                          userId: record.id,
+                          employeeName: record.name,
+                          employeeId: record.employee_id,
+                          emailAddress: record.email,
+                          payPeriod: dayjs(),
+                          payDate: dayjs(),
+                        };
+                        
+                        if (latestPayroll) {
+                          formValues.companyName = latestPayroll.company_name;
+                          formValues.companyAddress = latestPayroll.company_address;
+                          formValues.city = latestPayroll.city;
+                          formValues.country = latestPayroll.country;
+                          formValues.paidDays = latestPayroll.paid_days;
+                          formValues.lopDays = latestPayroll.lop_days;
+                          formValues.basic = latestPayroll.basic;
+                          formValues.hra = latestPayroll.hra;
+                          formValues.incomeTax = latestPayroll.income_tax;
+                          formValues.pf = latestPayroll.pf;
+                        }
+                        
+                        form.setFieldsValue(formValues);
+                        setCurrentView('addEmployee');
+                      }}
+                      type="primary"
+                    >
+                      Run Payroll
+                    </Button>
+                    {record.hasPayroll && (
+                      <Button 
+                        size="small"
+                        icon={<FilePdfOutlined />}
+                        onClick={() => {
+                          const latestPayroll = employees
+                            .filter(emp => emp.user_id === record.id)
+                            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+                          if (latestPayroll) {
+                            generatePayslipPDF(latestPayroll);
+                          }
                         }}
                       >
-                        Create Payroll
+                        Payslip
                       </Button>
-                      {record.hasPayroll && (
-                        <Button 
-                          size="small"
-                          icon={<FilePdfOutlined />}
-                          onClick={() => {
-                            const latestPayroll = employees
-                              .filter(emp => emp.user_id === record.id)
-                              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-                            if (latestPayroll) {
-                              generatePayslipPDF(latestPayroll);
-                            }
-                          }}
-                          style={{ borderRadius: '6px' }}
-                        >
-                          PDF
-                        </Button>
-                      )}
-                    </Space>
-                  ),
-                  responsive: ['xs', 'sm', 'md', 'lg']
-                },
-              ]}
-            />
-          </Card>
-        )}
-      </div>
-    </>
+                    )}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+    </div>
   );
 
-  if (!users || users.length === 0) {
+  if (!users) {
     return (
       <div style={{ padding: '50px', textAlign: 'center' }}>
         <Spin size="large" />
@@ -1302,7 +2022,7 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
             onClick={() => setCurrentView('dashboard')}
             style={{ color: 'white', marginRight: '20px', fontSize: '16px' }}
           >
-            Back to Employees
+            Back to Dashboard
           </Button>
         </div>
       </div>
@@ -1310,7 +2030,7 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
       <div style={{ padding: '30px 50px', background: '#f5f5f5', minHeight: 'calc(100vh - 120px)' }}>
         <div style={{ marginBottom: '30px' }}>
           <Title level={2} style={{ color: '#262626', marginBottom: '8px' }}>
-            Add New Employee
+            Create New Payroll
           </Title>
           <Text style={{ color: '#8c8c8c', fontSize: '16px' }}>
             Create professional payslips for your employees with ease.
@@ -1529,19 +2249,8 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
                       return optionText.includes(input.toLowerCase());
                     }}
                     onChange={(value) => {
-                      console.log('Selected user ID:', value);
-                      const selectedUser = users.find(user => user.id === value);
-                      console.log('Found user:', selectedUser);
-                      if (selectedUser) {
-                        form.setFieldsValue({
-                          employeeName: selectedUser.name,
-                          employeeId: selectedUser.employee_id,
-                          emailAddress: selectedUser.email
-                        });
-                      } else {
-                        message.error('Selected user not found');
-                      }
-                    }}
+  handleEmployeeSelect(value); // Use new function
+}}
                   >
                     {users.map(user => (
                       <Option key={user.id} value={user.id}>
@@ -1582,108 +2291,114 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
 
             <Row gutter={24}>
               <Col span={12}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <Title level={5} style={{ margin: 0, color: '#059669' }}>Earnings</Title>
-                  <Button 
-                    type="dashed" 
-                    icon={<PlusOutlined />} 
-                    onClick={addEarning}
-                    size="small"
-                    style={{ borderColor: '#10b981', color: '#10b981' }}
-                  >
-                    Add Earning
-                  </Button>
-                </div>
-                
-                {earnings.map((earning, index) => (
-                  <div key={earning.key} style={{ marginBottom: '16px', border: '1px solid #f0f0f0', padding: '12px', borderRadius: '6px' }}>
-                    <Row gutter={8}>
-                      <Col span={16}>
-                        <Input
-                          placeholder="Earning name"
-                          value={earning.label}
-                          onChange={(e) => updateEarning(index, 'label', e.target.value)}
-                          style={{ marginBottom: '8px' }}
-                        />
-                        <Form.Item name={earning.key} style={{ margin: 0 }}>
-                          <InputNumber 
-                            size="large" 
-                            style={{ width: '100%' }} 
-                            formatter={value => `₹ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                            parser={value => value.replace(/₹\s?|(,*)/g, '')}
-                            min={0}
-                            onChange={(value) => updateEarning(index, 'value', value || 0)}
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        {earnings.length > 1 && (
-                          <Button 
-                            type="text" 
-                            danger 
-                            onClick={() => removeEarning(index)}
-                            style={{ marginTop: '32px' }}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </Col>
-                    </Row>
-                  </div>
-                ))}
-              </Col>
-              
-              <Col span={12}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <Title level={5} style={{ margin: 0, color: '#dc2626' }}>Deductions</Title>
-                  <Button 
-                    type="dashed" 
-                    icon={<PlusOutlined />} 
-                    onClick={addDeduction}
-                    size="small"
-                    style={{ borderColor: '#dc2626', color: '#dc2626' }}
-                  >
-                    Add Deduction
-                  </Button>
-                </div>
-                
-                {deductions.map((deduction, index) => (
-                  <div key={deduction.key} style={{ marginBottom: '16px', border: '1px solid #f0f0f0', padding: '12px', borderRadius: '6px' }}>
-                    <Row gutter={8}>
-                      <Col span={16}>
-                        <Input
-                          placeholder="Deduction name"
-                          value={deduction.label}
-                          onChange={(e) => updateDeduction(index, 'label', e.target.value)}
-                          style={{ marginBottom: '8px' }}
-                        />
-                        <Form.Item name={deduction.key} style={{ margin: 0 }}>
-                          <InputNumber 
-                            size="large" 
-                            style={{ width: '100%' }} 
-                            formatter={value => `₹ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                            parser={value => value.replace(/₹\s?|(,*)/g, '')}
-                            min={0}
-                            onChange={(value) => updateDeduction(index, 'value', value || 0)}
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        {deductions.length > 1 && (
-                          <Button 
-                            type="text" 
-                            danger 
-                            onClick={() => removeDeduction(index)}
-                            style={{ marginTop: '32px' }}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </Col>
-                    </Row>
-                  </div>
-                ))}
-              </Col>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+    <Title level={5} style={{ margin: 0, color: '#059669' }}>Earnings</Title>
+    <Button 
+      type="dashed" 
+      icon={<PlusOutlined />} 
+      onClick={addEarning}
+      size="small"
+      style={{ borderColor: '#10b981', color: '#10b981' }}
+    >
+      Add Earning
+    </Button>
+  </div>
+  
+  {earnings.map((earning, index) => (
+    <div key={earning.key} style={{ marginBottom: '16px', border: '1px solid #f0f0f0', padding: '12px', borderRadius: '6px' }}>
+      <Row gutter={8}>
+        <Col span={16}>
+          <Input
+            placeholder="Earning name"
+            value={earning.label}
+            onChange={(e) => updateEarning(index, 'label', e.target.value)}
+            style={{ marginBottom: '8px' }}
+          />
+          <Form.Item name={earning.key} style={{ margin: 0 }}>
+            <InputNumber 
+              size="large" 
+              style={{ width: '100%' }} 
+              formatter={value => `₹ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              parser={value => value.replace(/₹\s?|(,*)/g, '')}
+              min={0}
+              value={earning.value}
+              onChange={(value) => {
+                updateEarning(index, 'value', value || 0);
+              }}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          {earnings.length > 1 && (
+            <Button 
+              type="text" 
+              danger 
+              onClick={() => removeEarning(index)}
+              style={{ marginTop: '32px' }}
+            >
+              Remove
+            </Button>
+          )}
+        </Col>
+      </Row>
+    </div>
+  ))}
+</Col>
+
+<Col span={12}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+    <Title level={5} style={{ margin: 0, color: '#dc2626' }}>Deductions</Title>
+    <Button 
+      type="dashed" 
+      icon={<PlusOutlined />} 
+      onClick={addDeduction}
+      size="small"
+      style={{ borderColor: '#dc2626', color: '#dc2626' }}
+    >
+      Add Deduction
+    </Button>
+  </div>
+  
+  {deductions.map((deduction, index) => (
+    <div key={deduction.key} style={{ marginBottom: '16px', border: '1px solid #f0f0f0', padding: '12px', borderRadius: '6px' }}>
+      <Row gutter={8}>
+        <Col span={16}>
+          <Input
+            placeholder="Deduction name"
+            value={deduction.label}
+            onChange={(e) => updateDeduction(index, 'label', e.target.value)}
+            style={{ marginBottom: '8px' }}
+          />
+          <Form.Item name={deduction.key} style={{ margin: 0 }}>
+            <InputNumber 
+              size="large" 
+              style={{ width: '100%' }} 
+              formatter={value => `₹ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+              parser={value => value.replace(/₹\s?|(,*)/g, '')}
+              min={0}
+              value={deduction.value}
+              onChange={(value) => {
+                updateDeduction(index, 'value', value || 0);
+              }}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          {deductions.length > 1 && (
+            <Button 
+              type="text" 
+              danger 
+              onClick={() => removeDeduction(index)}
+              style={{ marginTop: '32px' }}
+            >
+              Remove
+            </Button>
+          )}
+        </Col>
+      </Row>
+    </div>
+  ))}
+</Col>
             </Row>
 
             <Divider />
@@ -1791,10 +2506,7 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
                     style={{ 
                       width: '100px',
                       height: '45px',
-                      fontSize: '16px',
-                      background: '#8c8c8c',
-                      borderColor: '#8c8c8c',
-                      color: 'white'
+                      fontSize: '16px'
                     }}
                     onClick={() => form.resetFields()}
                   >
@@ -1809,42 +2521,118 @@ border: '1px solid #0D7139', borderRadius: '8px' }}>
     );
 
     return (
-      <Layout style={{ minHeight: '100vh' }}>
+      <Layout style={{ minHeight: '100vh', background: '#f7fafc' }}>
         <Content>
           {currentView === 'dashboard' ? renderDashboard() : renderAddEmployee()}
         </Content>
-        {/* ADD THE MODAL HERE - RIGHT AFTER </Content> AND BEFORE </Layout> */}
+        
     <Modal
-      title="Bulk Download Payslips"
-      open={bulkDownloadVisible}
-      onCancel={() => setBulkDownloadVisible(false)}
-      footer={[
-        <Button key="cancel" onClick={() => setBulkDownloadVisible(false)}>
-          Cancel
-        </Button>,
-        <Button key="download" type="primary" loading={loading} onClick={handleBulkDownload}>
-          Download Payslips
-        </Button>
-      ]}
+  title={
+    bulkActionType === 'download' ? "Bulk Download Payslips" : 
+    bulkActionType === 'email' ? "Bulk Send Emails" : 
+    "Export Excel Data"
+  }
+  open={bulkDownloadVisible}
+  onCancel={() => setBulkDownloadVisible(false)}
+  footer={[
+    <Button key="cancel" onClick={() => setBulkDownloadVisible(false)}>
+      Cancel
+    </Button>,
+    <Button 
+      key="action" 
+      type="primary" 
+      loading={loading} 
+      onClick={
+        bulkActionType === 'download' ? handleBulkDownload : 
+        bulkActionType === 'email' ? handleEmailOnly :
+        bulkActionType === 'excel' ? handleExcelExport : null
+      }
+      disabled={selectedEmployees.length === 0}
     >
-      <div style={{ padding: '20px 0' }}>
-        <Text strong style={{ display: 'block', marginBottom: '16px' }}>
-          Select month to download all payslips:
-        </Text>
-        <DatePicker
-          picker="month"
-          value={selectedMonth}
-          onChange={setSelectedMonth}
-          style={{ width: '100%' }}
-          size="large"
-        />
-        <div style={{ marginTop: '16px', padding: '12px', background: '#f6ffed', borderRadius: '6px' }}>
-          <Text type="secondary">
-            All payslips for {selectedMonth.format('MMMM YYYY')} will be generated and downloaded.
-          </Text>
-        </div>
-      </div>
-    </Modal>
+      {bulkActionType === 'download' ? 'Download Selected' : 
+       bulkActionType === 'email' ? 'Send to Selected' :
+       bulkActionType === 'excel' ? 'Export Excel' : 'Action'}
+    </Button>
+  ]}
+>
+  <div style={{ padding: '20px 0' }}>
+    <Text strong style={{ display: 'block', marginBottom: '16px' }}>
+      Select month and employees:
+    </Text>
+    <DatePicker
+      picker="month"
+      value={selectedMonth}
+      onChange={setSelectedMonth}
+      style={{ width: '100%', marginBottom: '16px' }}
+      size="large"
+    />
+    <Text>Selected employees: {selectedEmployees.length}</Text>
+  </div>
+</Modal>
+
+    <Modal
+  title="Monthly Expenses"
+  open={expensesModalVisible}
+  onCancel={() => setExpensesModalVisible(false)}
+  width={800}
+  footer={[
+    <Button key="cancel" onClick={() => setExpensesModalVisible(false)}>
+      Cancel
+    </Button>,
+    <Button key="save" type="primary" onClick={() => {
+      saveMonthlyExpenses(monthlyExpensesData);
+      setExpensesModalVisible(false);
+    }}>
+      Save Expenses
+    </Button>,
+    <Button key="excel" icon={<DownloadOutlined />} onClick={handleExpensesExport}>
+      Export to Excel
+    </Button>
+  ]}
+>
+  <div style={{ marginBottom: '20px' }}>
+    <Text strong>Select Month:</Text>
+    <DatePicker
+      picker="month"
+      value={dayjs(selectedExpenseMonth || dayjs().format('YYYY-MM'))}
+      onChange={(date) => {
+        const monthYear = date.format('YYYY-MM');
+        setSelectedExpenseMonth(monthYear);
+        fetchExpenses(monthYear);
+      }}
+      style={{ width: '100%', marginTop: '8px' }}
+      size="large"
+    />
+  </div>
+  <ExpensesList 
+    expenses={monthlyExpensesData}
+    onChange={setMonthlyExpensesData}
+  />
+</Modal>
+
+<Modal
+  title="Edit This Month's Payroll"
+  open={payrollEditModalVisible}
+  onCancel={() => setPayrollEditModalVisible(false)}
+  onOk={() => {
+    const form = document.getElementById('payroll-edit-input');
+    if (form) {
+      saveEditedPayroll(parseFloat(form.value) || 0);
+    }
+  }}
+>
+  <div>
+    <Text>Current calculated amount: ₹{thisMonthPayroll.toLocaleString()}</Text>
+    <Input
+      id="payroll-edit-input"
+      type="number"
+      placeholder="Enter custom amount"
+      defaultValue={thisMonthPayroll}
+      style={{ marginTop: '10px' }}
+    />
+  </div>
+</Modal>
+
     <Modal
   title="Send Payslip Emails"
   open={emailOnlyVisible}
