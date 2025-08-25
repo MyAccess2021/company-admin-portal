@@ -37,7 +37,7 @@ import { supabase } from '../../supabase/config';
 import JSZip from 'jszip';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
-
+const baseUrl = import.meta.env.VITE_API_BASE_URL;
 const { Header, Content } = Layout;
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -883,7 +883,7 @@ const netPay = Number(record.net_pay) || (totalEarnings - totalDeductions);
       
       formData.append('payslip', pdfBlob, `payslip_${employeeData.employee_name}_${dayjs(employeeData.pay_period).format('YYYY-MM')}.pdf`);
       
-      const response = await fetch('http://localhost:5000/api/payslip', {
+      const response = await fetch(`${baseUrl}payslip`, {
         method: 'POST',
         body: formData
       });
@@ -1869,11 +1869,26 @@ if (printWindow) {
   }}
             scroll={{ x: 800 }}
             pagination={{
-              pageSize: 10,
-              showSizeChanger: true,
-              showQuickJumper: true,
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} employees`,
-            }}
+  pageSize: 10,
+  showSizeChanger: true,
+  showQuickJumper: true,
+  loading:{loading},
+  showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} employees`,
+  itemRender: (current, type, originalElement) => {
+    if (type === 'page') {
+      return (
+        <a style={{ 
+          color: '#000000d9', 
+          backgroundColor: 'white',
+          border: '1px solid #d9d9d9'
+        }}>
+          {current}
+        </a>
+      );
+    }
+    return originalElement;
+  }
+}}
             columns={[
               {
                 title: 'Employee',

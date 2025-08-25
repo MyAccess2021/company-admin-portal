@@ -7,21 +7,17 @@ import CryptoJS from 'crypto-js';
 import { Upload, message as antMessage } from 'antd';
 const { Title, Text } = Typography;
 const { Search } = Input;
-
+const baseUrl = import.meta.env.VITE_API_BASE_URL;
 const sendWelcomeEmail = async (employeeData) => {
   try {
-    const response = await fetch('https://cap.myaccessio.com/api/send-email', {
+    const response = await fetch(`${baseUrl}send-email`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        senderEmail: "suryavenkatareddy90@gmail.com",
-        senderPassword: "vrxftrjsiekrxdnf",
         recipientEmail: employeeData.email,
         subject: "Welcome - Your Account Credentials",
-        smtpServer: "smtp.gmail.com",
-        smtpPort: 587,
         templateData: {
           company_name: "My Access",
           to_name: employeeData.name,
@@ -35,7 +31,6 @@ const sendWelcomeEmail = async (employeeData) => {
     });
 
     const result = await response.json();
-    
     if (response.ok) {
       return { success: true, message: 'Email sent successfully' };
     } else {
@@ -45,7 +40,7 @@ const sendWelcomeEmail = async (employeeData) => {
     console.error('Email API Error:', error);
     return { success: false, message: 'Network error while sending email' };
   }
-};
+}
 // Mobile HR Card Component
 const MobileHRCard = React.memo(({ hr, onEdit, onDelete }) => (
   <Card 
@@ -116,6 +111,20 @@ const MobileHRCard = React.memo(({ hr, onEdit, onDelete }) => (
           }}>
             <MailOutlined /> {hr.email}
           </Text>
+          {hr.mobile && (
+            <Text type="secondary" style={{ 
+              fontSize: '12px',
+              display: 'block',
+              marginBottom: '4px'
+            }}>
+              📱 {hr.mobile}
+            </Text>
+          )}
+          {hr.employee_id && (
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              ID: {hr.employee_id}
+            </Text>
+          )}
           {hr.employee_id && (
             <Text type="secondary" style={{ fontSize: '12px' }}>
               ID: {hr.employee_id}
@@ -163,6 +172,7 @@ const HRFormModal = React.memo(({ isOpen, onClose, editingHR, onSuccess,generate
           form.setFieldsValue({
             name: editingHR.name,
             email: editingHR.email,
+             mobile: editingHR.mobile,
             role: editingHR.role,
             isactive: editingHR.isactive !== undefined ? editingHR.isactive : false
           });
@@ -222,6 +232,7 @@ const HRFormModal = React.memo(({ isOpen, onClose, editingHR, onSuccess,generate
         const updateData = {
           name: values.name,
           email: values.email,
+           mobile: values.mobile,
           role: values.role || 'hr',
           employee_id: values.employeeId,
           isactive: values.isActive !== undefined ? values.isActive : false,
@@ -250,6 +261,7 @@ const encryptedPassword = CryptoJS.AES.encrypt(password, ENCRYPTION_KEY).toStrin
 const hrData = {
   name: values.name,
   email: values.email,
+  mobile: values.mobile,
   employee_id: generatedHRId,
   role: 'hr',
   isactive: values.isActive !== undefined ? values.isActive : false,
@@ -366,7 +378,7 @@ const hrData = {
           <Input placeholder="Enter HR name" />
         </Form.Item>
 
-        <Form.Item
+      <Form.Item
           name="email"
           label="Email"
           rules={[
@@ -375,6 +387,16 @@ const hrData = {
           ]}
         >
           <Input placeholder="Enter email address" />
+        </Form.Item>
+
+        <Form.Item
+          name="mobile"
+          label="Phone Number"
+          rules={[
+            { pattern: /^[0-9]{10}$/, message: 'Please enter valid 10-digit phone number' }
+          ]}
+        >
+          <Input placeholder="Enter phone number" maxLength={10} />
         </Form.Item>
 
         <Form.Item
@@ -484,6 +506,7 @@ const generateHRId = useCallback(async () => {
         id,
         name,
         email,
+        mobile,
         role,
         employee_id,
         isactive,
@@ -518,6 +541,7 @@ const applyFiltersAndPagination = useCallback((hrList, search = '', page = 1, pa
       filteredHRs = filteredHRs.filter(hr =>
         hr.name?.toLowerCase().includes(searchLower) ||
         hr.email?.toLowerCase().includes(searchLower) ||
+        hr.mobile?.toLowerCase().includes(searchLower) ||
         (hr.employee_id && hr.employee_id.toLowerCase().includes(searchLower))
       );
     }
@@ -896,8 +920,8 @@ useEffect(() => {
 <Card style={{ marginBottom: '24px' }} className={`animated-card-delayed ${isMobile ? 'mobile-search' : ''}`}>
   <Row gutter={[16, 16]} align="middle">
     <Col xs={24} sm={24} md={14} lg={16}>
-      <Search
-        placeholder="Search HRs by name, email or HR ID..."
+   <Search
+        placeholder="Search HRs by name, email, phone or HR ID..."
         allowClear
         enterButton={
           <Button 

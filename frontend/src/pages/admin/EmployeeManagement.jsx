@@ -35,7 +35,7 @@ import { supabase, supabaseAdmin } from '../../supabase/config';
 import ErrorPage from '../../error/ErrorPage';
 const { Title, Text } = Typography;
 const { Search } = Input;
-
+const baseUrl = import.meta.env.VITE_API_BASE_URL;
 const generateEmployeeId = async (employeeType) => {
   try {
     // Get the latest employee ID for the specific type
@@ -82,7 +82,7 @@ const generateEmployeeId = async (employeeType) => {
 };
 const sendWelcomeEmail = async (employeeData) => {
   try {
-    const response = await fetch('http://localhost:5000/api/send-email', {
+    const response = await fetch(`${baseUrl}send-email`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -567,38 +567,6 @@ const updateData = {
         console.error('Supabase update error:', error);
         throw error;
       }
-
-      // Update payroll record
-      // Create payroll record
-if (values.pay && data && data[0]) {
-  const payAmount = parseFloat(values.pay);
-  const currentDate = new Date();
-  
-  // Create basic earnings array with user's pay
-  const earningsArray = [
-    { type: `earning_${Date.now()}`, label: "Basic", amount: payAmount }
-  ];
-  
-  const payrollData = {
-    user_id: data[0].id,
-    company_name: "My Access",
-    company_address: "Your Company Address", 
-    city: "Your City",
-    employee_name: values.name,
-    employee_id: newEmployeeId,
-    email_address: values.email,
-    pay_period: currentDate.toISOString().slice(0, 7) + '-01',
-    pay_date: currentDate.toISOString().slice(0, 10),
-    paid_days: 30,
-    lop_days: 0,
-    earnings: earningsArray,  // Use new JSONB structure
-    deductions: []            // Empty deductions array
-  };
-  
-  const { error: payrollError } = await supabaseAdmin
-    .from('payroll')
-    .insert(payrollData);
-}
       
       // Send email with new credentials if email was updated
       if (newPlainPassword && isUpdatingEmail && values.newEmail && values.newEmail !== currentEmail) {
@@ -651,7 +619,7 @@ if (values.pay && data && data[0]) {
 };
       console.log('Creating employee with data:', employeeData);
 
-      const { data, error } = await supabaseAdmin
+        const { data, error } = await supabaseAdmin
         .from('users')
         .insert([employeeData])
         .select();
@@ -661,7 +629,39 @@ if (values.pay && data && data[0]) {
         throw error;
       }
       message.success('Employee created successfully!');
-      
+      if (values.pay && data && data[0]) {
+    const payAmount = parseFloat(values.pay);
+    const currentDate = new Date();
+    
+    // Create basic earnings array with user's pay
+    const earningsArray = [
+      { type: `earning_${Date.now()}`, label: "Basic", amount: payAmount }
+    ];
+    
+    const payrollData = {
+      user_id: data[0].id,
+      company_name: "My Access",
+      company_address: "Your Company Address", 
+      city: "Your City",
+      employee_name: values.name,
+      employee_id: newEmployeeId,
+      email_address: values.email,
+      pay_period: currentDate.toISOString().slice(0, 7) + '-01',
+      pay_date: currentDate.toISOString().slice(0, 10),
+      paid_days: 30,
+      lop_days: 0,
+      earnings: earningsArray,
+      deductions: []
+    };
+    
+    const { error: payrollError } = await supabaseAdmin
+      .from('payroll')
+      .insert(payrollData);
+
+    if (payrollError) {
+      console.error('Payroll creation error:', payrollError);
+    }
+  }
       // Send welcome email with plain password
       try {
         const emailResult = await sendWelcomeEmail({
@@ -2948,7 +2948,7 @@ const handleClearFilters = useCallback(() => {
 {
   title: 'Pay',
   render: (text, record) => {
-    console.log('Record payroll:', record.payroll); // You can remove this after testing
+    
     
     // Check if employee has payroll records
     if (!record.payroll || !Array.isArray(record.payroll) || record.payroll.length === 0) {

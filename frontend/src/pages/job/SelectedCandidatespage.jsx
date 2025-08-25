@@ -23,7 +23,7 @@ const { Option } = Select;
 const { RangePicker } = DatePicker;
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
-
+const baseUrl = import.meta.env.VITE_API_BASE_URL;
 // Supabase configuration
 import { supabase} from '../../supabase/config';
 
@@ -40,6 +40,9 @@ const SelectedCandidatesPage = ({ userRole }) => {
   const [dateRange, setDateRange] = useState(null);
   const [jobTitles, setJobTitles] = useState([]);
   const [filtersVisible, setFiltersVisible] = useState(false);
+  // Add this new state after your existing modal states
+const [offerTypeModalVisible, setOfferTypeModalVisible] = useState(false);
+const [selectedOfferType, setSelectedOfferType] = useState(null);
 
   // Modal states
   const [candidateModalVisible, setCandidateModalVisible] = useState(false);
@@ -70,59 +73,7 @@ useEffect(() => {
   return () => window.removeEventListener('resize', handleResize);
 }, []);
 
-// const mobileColumns = [
-//   {
-//     title: 'Candidate',
-//     key: 'candidate',
-//     render: (_, record) => (
-//       <div>
-//         <div style={{ fontWeight: 500, fontSize: '14px' }}>{record.name}</div>
-//         <div style={{ fontSize: '12px', color: '#666' }}>{record.jobTitle}</div>
-//         <div style={{ fontSize: '11px', color: '#999' }}>{record.email}</div>
-//         <div style={{ marginTop: '4px' }}>
-//           {record.offerSent ? (
-//             <Tag color="green" size="small">Offer Sent</Tag>
-//           ) : (
-//             <Tag color="orange" size="small">Pending</Tag>
-//           )}
-//         </div>
-//       </div>
-//     ),
-//   },
-//   {
-//     title: 'Actions',
-//     key: 'actions',
-//     width: 100,
-//     render: (_, record) => (
-//       <Space direction="vertical" size="small">
-//         <Button 
-//           size="small" 
-//           block
-//           icon={<EyeOutlined />}
-//           onClick={() => {
-//             setSelectedCandidate(record);
-//             setCandidateModalVisible(true);
-//           }}
-//         >
-//           Details
-//         </Button>
-//         <Button
-//           size="small"
-//           block
-//           type={record.offerSent ? "default" : "primary"}
-//           icon={<SendOutlined />}
-//           onClick={() => {
-//             setSelectedCandidate(record);
-//             setOfferModalVisible(true);
-//           }}
-//           disabled={record.offerSent}
-//         >
-//           {record.offerSent ? 'Sent' : 'Send Offer'}
-//         </Button>
-//       </Space>
-//     ),
-//   }
-// ];
+
 const fetchSelectedCandidates = async () => {
   setLoading(true);
   try {
@@ -326,22 +277,45 @@ const sendOfferLetter = async (offerData) => {
       : '';
     
     // Generate PDF with updated data including new fields
-   const pdfBlob = generateOfferLetterPDF(candidateData, {
+    const pdfBlob = generateOfferLetterPDF(candidateData, {
       ...offerData,
       joiningDate: formattedJoiningDate
     });
     
-    // Convert blob to base64 for email attachment
-    const base64PDF = await new Promise((resolve) => {
+    // Convert blob to base64 for email attachment - FIXED VERSION
+    const base64PDF = await new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onloadend = () => {
+        try {
+          const result = reader.result;
+          if (!result) {
+            throw new Error('Failed to read PDF blob');
+          }
+          // Extract base64 data (remove data:application/pdf;base64, prefix)
+          const base64Data = result.split(',')[1];
+          if (!base64Data) {
+            throw new Error('Failed to extract base64 data from PDF');
+          }
+          console.log('PDF converted to base64, length:', base64Data.length);
+          resolve(base64Data);
+        } catch (error) {
+          console.error('Error processing PDF:', error);
+          reject(error);
+        }
+      };
+      reader.onerror = (error) => {
+        console.error('FileReader error:', error);
+        reject(new Error('FileReader failed to read PDF blob'));
+      };
+      
+      // Start reading the blob as data URL
       reader.readAsDataURL(pdfBlob);
     });
     
-    // Prepare email template parameters - UPDATED to include all fields
+    // Prepare email template parameters
     const emailParams = {
-      to_name: candidateData.name, // Changed from selectedCandidate.name
-      to_email: candidateData.email, // Changed from selectedCandidate.email
+      to_name: candidateData.name,
+      to_email: candidateData.email,
       job_title: offerData.jobTitle,
       company_name: offerData.companyName,
       salary_amount: offerData.salaryAmount,
@@ -356,100 +330,160 @@ const sendOfferLetter = async (offerData) => {
 
     console.log('Email params:', emailParams);
 
-    const response = await fetch('http://localhost:5000/api/send-job-offer', {
+    // FIXED: Send request with proper structure
+    const response = await fetch(`${baseUrl}send-job-offer`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        senderEmail: "suryavenkatareddy90@gmail.com",
-        senderPassword: "vrxftrjsiekrxdnf",
         recipientEmail: candidateData.email,
         subject: `Job Offer - ${offerData.jobTitle} Position at ${offerData.companyName}`,
-        smtpServer: "smtp.gmail.com",
-        smtpPort: 587,
-        templateData: {
-          to_name: candidateData.name, // Changed from selectedCandidate.name
-          job_title: offerData.jobTitle,
-          company_name: offerData.companyName,
-          salary_amount: offerData.salaryAmount,
-          joining_date: formattedJoiningDate,
-          work_location: offerData.workLocation,
-          reporting_manager: offerData.reportingManager,
-          additional_benefits: offerData.additionalBenefits,
-          offer_valid_until: offerData.offerValidUntil,
-          message: offerData.message || '',
-          hr_contact: offerData.hrContact
-        },
+        templateData: emailParams,
         attachments: [{
-          filename: `Offer_Letter_${candidateData.name.replace(/\s+/g, '_')}.pdf`, // Changed from selectedCandidate.name
+          filename: `Offer_Letter_${candidateData.name.replace(/\s+/g, '_')}.pdf`,
           content: base64PDF,
-          contentType: 'application/pdf'
-        }]
-      })
+          contentType: 'application/pdf',
+        }],
+      }),
     });
+
+    // Check if response is ok before parsing JSON
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
 
     const result = await response.json();
     console.log('Email result:', result);
 
-  // Add this section inside sendOfferLetter function after successful email sending
-if (response.ok && result.success) {
-  // For selected candidates (existing logic)
-  if (selectedCandidate && selectedCandidate.id && !selectedCandidate.isManual) {
-    // ... existing database update logic for job_applications table
-    
-  } 
-  // NEW: For manual offers, store in manual_offers table
-  else {
-    try {
-      const { error: insertError } = await supabase
-        .from('manual_offers')
-        .insert({
-          candidate_name: candidateData.name,
-          candidate_email: candidateData.email,
-          candidate_phone: offerData.candidatePhone,
-          candidate_address: offerData.candidateAddress,
-          job_title: offerData.jobTitle,
-          company_name: offerData.companyName,
-          salary_amount: offerData.salaryAmount,
-          joining_date: formattedJoiningDate,
-          work_location: offerData.workLocation,
-          reporting_manager: offerData.reportingManager,
-          offer_valid_until: offerData.offerValidUntil,
-          hr_contact: offerData.hrContact,
-          additional_benefits: offerData.additionalBenefits,
-          message: offerData.message,
-          email_status: 'sent'
-        });
+    // Handle successful email sending
+    if (result.success) {
+      // For selected candidates (existing logic)
+      if (selectedCandidate && selectedCandidate.id && !selectedCandidate.isManual) {
+        const { error: updateError } = await supabase
+          .from('job_applications')
+          .update({
+            mail_history: [
+              ...(selectedCandidate.mailHistory || []),
+              {
+                type: 'offer',
+                sentDate: new Date().toISOString(),
+                offerDetails: {
+                  jobTitle: offerData.jobTitle,
+                  companyName: offerData.companyName,
+                  salaryAmount: offerData.salaryAmount,
+                  joiningDate: formattedJoiningDate,
+                  workLocation: offerData.workLocation,
+                  reportingManager: offerData.reportingManager,
+                  additionalBenefits: offerData.additionalBenefits,
+                  offerValidUntil: offerData.offerValidUntil,
+                  candidatePhone: offerData.candidatePhone,
+                  candidateAddress: offerData.candidateAddress,
+                  hrContact: offerData.hrContact,
+                  message: offerData.message
+                },
+                emailStatus: 'sent'
+              }
+            ]
+          })
+          .eq('id', selectedCandidate.id);
 
-      if (insertError) {
-        console.error('Error saving manual offer:', insertError);
-        message.warning('Email sent but failed to save record in database');
-      } else {
-        // Refresh the candidates list to show the new manual offer
-        fetchSelectedCandidates();
+        if (updateError) {
+          console.error('Error updating candidate record:', updateError);
+          message.warning('Email sent but failed to update record');
+        } else {
+          fetchSelectedCandidates();
+        }
+      } 
+      // For manual offers, store in manual_offers table
+      else {
+        try {
+          // Format the joining date properly for PostgreSQL
+          let formattedJoiningDateForDB = null;
+          if (offerData.joiningDate) {
+            const dateObj = offerData.joiningDate._isAMomentObject ? 
+              offerData.joiningDate.toDate() : 
+              new Date(offerData.joiningDate);
+            
+            formattedJoiningDateForDB = dateObj.toISOString().split('T')[0];
+          }
+
+          // Format offer valid until date if it's a date
+          let formattedValidUntilForDB = null;
+          if (offerData.offerValidUntil && offerData.offerValidUntil !== '7 days from offer date') {
+            try {
+              const validUntilDate = new Date(offerData.offerValidUntil);
+              if (!isNaN(validUntilDate.getTime())) {
+                formattedValidUntilForDB = validUntilDate.toISOString().split('T')[0];
+              } else {
+                formattedValidUntilForDB = offerData.offerValidUntil;
+              }
+            } catch (e) {
+              formattedValidUntilForDB = offerData.offerValidUntil;
+            }
+          } else {
+            formattedValidUntilForDB = offerData.offerValidUntil;
+          }
+
+          const { error: insertError } = await supabase
+            .from('manual_offers')
+            .insert({
+              candidate_name: candidateData.name,
+              candidate_email: candidateData.email,
+              candidate_phone: offerData.candidatePhone,
+              candidate_address: offerData.candidateAddress,
+              job_title: offerData.jobTitle,
+              company_name: offerData.companyName,
+              salary_amount: offerData.salaryAmount,
+              joining_date: formattedJoiningDateForDB,
+              work_location: offerData.workLocation,
+              reporting_manager: offerData.reportingManager,
+              offer_valid_until: formattedValidUntilForDB,
+              hr_contact: offerData.hrContact,
+              additional_benefits: offerData.additionalBenefits,
+              message: offerData.message,
+              email_status: 'sent',
+              sent_date: new Date().toISOString()
+            });
+
+          if (insertError) {
+            console.error('Error saving manual offer:', insertError);
+            message.warning('Email sent but failed to save record in database');
+          } else {
+            console.log('Manual offer saved successfully');
+            fetchSelectedCandidates();
+          }
+        } catch (error) {
+          console.error('Error saving manual offer:', error);
+          message.warning('Email sent but failed to save record');
+        }
       }
-    } catch (error) {
-      console.error('Error saving manual offer:', error);
-      message.warning('Email sent but failed to save record');
-    }
-  }
-  
-  setOfferModalVisible(false);
-  message.success(`Offer letter sent successfully to ${candidateData.name}!`);
-} else {
-      throw new Error('Email service returned error: ' + result.message);
+      
+      setOfferModalVisible(false);
+      message.success(`Offer letter sent successfully to ${candidateData.name}!`);
+    } else {
+      throw new Error('Email service returned error: ' + (result.message || result.error));
     }
   } catch (error) {
     console.error('Error sending offer letter:', error);
     
-    if (error.text) {
-      message.error('Failed to send email: ' + error.text);
-    } else if (error.message) {
-      message.error('Failed to send offer letter: ' + error.message);
+    // Better error handling
+    let errorMessage = 'Failed to send offer letter. ';
+    
+    if (error.message.includes('HTTP')) {
+      errorMessage += 'Server error: ' + error.message;
+    } else if (error.message.includes('Failed to read PDF')) {
+      errorMessage += 'PDF generation failed. Please try again.';
+    } else if (error.message.includes('Failed to extract base64')) {
+      errorMessage += 'PDF conversion failed. Please try again.';
+    } else if (error.message.includes('fetch')) {
+      errorMessage += 'Network error. Please check your connection.';
     } else {
-      message.error('Failed to send offer letter. Please check your configuration.');
+      errorMessage += error.message || 'Unknown error occurred.';
     }
+    
+    message.error(errorMessage);
   } finally {
     setLoading(false);
   }
@@ -564,18 +598,35 @@ const generateOfferLetterPDF = (candidateData, offerData) => {
     });
   };
 
-  const addOfferDetailsTable = () => {
-    checkPageBreak(80);
-    
-    const tableStartY = yPosition;
-    const rowHeight = 11;
-    const lineColor = '#E0E0E0';
-    const col1X = leftMargin + 2;
-    const col2X = leftMargin + (contentWidth / 2) + 5;
+ const addOfferDetailsTable = () => {
+  checkPageBreak(80);
+  
+  const tableStartY = yPosition;
+  const rowHeight = 11;
+  const lineColor = '#E0E0E0';
+  const col1X = leftMargin + 2;
+  const col2X = leftMargin + (contentWidth / 2) + 5;
 
-    addSectionTitle('OFFER DETAILS');
+  addSectionTitle('OFFER DETAILS');
+  
+  // Different table data based on offer type
+  let tableData;
+  
+  if (selectedOfferType === 'internship') {
+    tableData = [
+      ['Position:', offerData.jobTitle],
+      ['Internship Duration:', offerData.internshipDuration || '6 months'],
+      ['Start Date:', offerData.joiningDate],
+      ['Reporting Location:', offerData.reportingLocation || offerData.workLocation],
+      ['Offer Valid Until:', offerData.offerValidUntil]
+    ];
     
-    const tableData = [
+    // Add stipend only if provided
+    if (offerData.salaryAmount && offerData.salaryAmount.trim()) {
+      tableData.splice(2, 0, ['Stipend:', offerData.salaryAmount]);
+    }
+  } else {
+    tableData = [
       ['Position:', offerData.jobTitle],
       ['Annual Salary:', offerData.salaryAmount],
       ['Start Date:', offerData.joiningDate],
@@ -583,32 +634,32 @@ const generateOfferLetterPDF = (candidateData, offerData) => {
       ['Reporting Manager:', offerData.reportingManager],
       ['Offer Valid Until:', offerData.offerValidUntil]
     ];
-    
-    doc.setFontSize(10);
-    doc.setLineWidth(0.25);
-    doc.setDrawColor(lineColor);
-    
-    let currentY = yPosition;
+  }
+  
+  doc.setFontSize(10);
+  doc.setLineWidth(0.25);
+  doc.setDrawColor(lineColor);
+  
+  let currentY = yPosition;
 
-    tableData.forEach((row, index) => {
-      doc.setFont(primaryFont, 'bold');
-      doc.setTextColor(textColor);
-      doc.text(row[0], col1X, currentY + 8);
-      
-      doc.setFont(primaryFont, 'normal');
-      doc.setTextColor(textColor);
-      doc.text(row[1], col2X, currentY + 8);
-      
-      currentY += rowHeight;
-      
-      if (index < tableData.length) {
-          doc.line(leftMargin, currentY + 1, pageWidth - rightMargin, currentY + 1);
-      }
-    });
+  tableData.forEach((row, index) => {
+    doc.setFont(primaryFont, 'bold');
+    doc.setTextColor(textColor);
+    doc.text(row[0], col1X, currentY + 8);
     
-    yPosition = currentY + 10;
-  };
-
+    doc.setFont(primaryFont, 'normal');
+    doc.setTextColor(textColor);
+    doc.text(row[1], col2X, currentY + 8);
+    
+    currentY += rowHeight;
+    
+    if (index < tableData.length) {
+      doc.line(leftMargin, currentY + 1, pageWidth - rightMargin, currentY + 1);
+    }
+  });
+  
+  yPosition = currentY + 10;
+};
   // --- Document Generation Starts ---
   addHeader(offerData.companyName);
   addFooter();
@@ -638,15 +689,47 @@ const generateOfferLetterPDF = (candidateData, offerData) => {
 
   // Introduction Paragraph
   checkPageBreak(30);
-  const introParagraph = `On behalf of ${offerData.companyName || 'MyAccess Pvt. Ltd.'} (the "Company"), we are delighted to offer you the position of ${offerData.jobTitle}. We were impressed with your qualifications and experience, and we are excited about the prospect of you joining our team. This letter clarifies and confirms the terms of your employment with the Company.`;
-  addText(introParagraph);
+   let introParagraph;
+  
+  if (selectedOfferType === 'internship') {
+    introParagraph = `On behalf of ${offerData.companyName || 'MyAccess Pvt. Ltd.'} (the "Company"), we are pleased to offer you the position of ${offerData.jobTitle}. This letter clarifies and confirms the terms of your internship with the Company.
+
+Please note that this is an internship for a duration of ${offerData.internshipDuration || '6 months'}. Your internship will begin on ${offerData.joiningDate}, and will conclude on [End Date].
+
+As an intern, you will have the opportunity to work on cutting-edge projects, gaining hands-on experience in developing solutions, analyzing data, and integrating technology solutions into practical applications. We are confident that this opportunity will provide significant learning and development to enhance your skills and prepare you for future career opportunities.`;
+  } else {
+   introParagraph = `On behalf of ${offerData.companyName || 'MyAccess Pvt. Ltd.'} (the "Company"), we are delighted to offer you the position of ${offerData.jobTitle}. We were impressed with your qualifications and experience, and we are excited about the prospect of you joining our team. This letter clarifies and confirms the terms of your employment with the Company.`;
+  }addText(introParagraph);
   yPosition += 15;
+
 
   // --- Detailed Sections ---
   
+if (selectedOfferType === 'internship') {
+  // For internship - only show stipend section if stipend is provided
+  if (offerData.salaryAmount && offerData.salaryAmount.trim()) {
+    addSectionTitle('STIPEND & BENEFITS');
+    const stipendText = `You will receive a stipend of ${offerData.salaryAmount}, payable monthly in accordance with the Company's standard procedures. The stipend is designed to support you during your learning period.`;
+    addText(stipendText);
+    yPosition += 5;
+  } else {
+    addSectionTitle('INTERNSHIP BENEFITS');
+    const benefitsText = `This internship is designed as a learning opportunity to gain hands-on experience and develop your professional skills. You will receive mentorship, training, and exposure to real-world projects.`;
+    addText(benefitsText);
+    yPosition += 5;
+  }
+
+  if (offerData.additionalBenefits && offerData.additionalBenefits.trim()) {
+    checkPageBreak(20);
+    addText('In addition, you will have access to the following benefits:', { fontStyle: 'bold' });
+    yPosition += 2;
+    addText(offerData.additionalBenefits);
+    yPosition += 10;
+  }
+} else {
+  // Existing employment compensation section
   addSectionTitle('COMPENSATION & BENEFITS');
-  const compensationText = `You will receive an annual salary of ${offerData.salaryAmount}, payable monthly in accordance with the Company's standard payroll procedures. Your position is exempt from overtime pay, and your salary will compensate you for all hours worked.You will receive your full salary in any work week that you perform work subject to limited deductions permitted by law
-as applicable to your status as a salaried exempt employee. The company reserves the right to modify compensation and benefits from time to time as deemed necessary.`;
+  const compensationText = `You will receive an annual salary of ${offerData.salaryAmount}, payable monthly in accordance with the Company's standard payroll procedures. Your position is exempt from overtime pay, and your salary will compensate you for all hours worked.You will receive your full salary in any work week that you perform work subject to limited deductions permitted by law as applicable to your status as a salaried exempt employee. The company reserves the right to modify compensation and benefits from time to time as deemed necessary.`;
   addText(compensationText);
   yPosition += 5;
 
@@ -661,8 +744,13 @@ as applicable to your status as a salaried exempt employee. The company reserves
   const esopText = `As part of your compensation, you will be granted Employee Stock Options (ESOPs). A separate letter with the detailed terms and conditions, including the vesting schedule, will be provided to you.`;
   addText(esopText);
   yPosition += 10;
+}
+  
+  
   
   addNewPage();
+  
+  
 
   addSectionTitle('CONDITIONS OF EMPLOYMENT');
   const backgroundText = 'This offer is contingent upon the successful completion of a background verification. Any misrepresentation of your academic or employment details may result in the termination of this offer without notice.';
@@ -686,10 +774,11 @@ as applicable to your status as a salaried exempt employee. The company reserves
   const docCol2 = leftMargin + colWidth + 10;
   let y1 = yPosition;
   let y2 = yPosition;
+  
 
   const addDocItem = (text, col) => {
     doc.setFont(primaryFont, 'normal');
-    const lines = doc.splitTextToSize(`•  ${text}`, colWidth);
+    const lines = doc.splitTextToSize(`• ${text}`, colWidth);
     if (col === 1) {
       if (checkPageBreak(lines.length * 6)) y1 = yPosition;
       lines.forEach(line => { doc.text(line, docCol1, y1); y1 += 6; });
@@ -728,6 +817,26 @@ as applicable to your status as a salaried exempt employee. The company reserves
   const extensionText = `As per the Company policy, only one extension in the Date of Joining would be granted based on medical exigencies. The extension can be done for a maximum period of one month from the initial date of joining. Please note that any request for extension must be supported with documentary evidence (Medical record and certificate). The Company will review the documents provided on a Case-to-Case basis and we may extend the Date of Joining based on business requirements. All such requests for the date of joining extension have to be made at least a week before the initial date of joining. Granting this extension is solely at the discretion of the Company.`;
   addText(extensionText);
   yPosition += 15;
+  if (selectedOfferType === 'internship') {
+  checkPageBreak(100);
+  addText('04. Internship Completion:', { fontStyle: 'bold' });
+  const internshipCompletionText = `Upon successful completion of your ${offerData.internshipDuration || '6 months'} internship, you will receive a Certificate of Internship from ${offerData.companyName || 'MyAccess Pvt. Ltd.'}. Completion of the internship does not guarantee a permanent role, but exceptional performance may be considered for future employment opportunities.`;
+  addText(internshipCompletionText);
+  yPosition += 10;
+
+  checkPageBreak(50);
+  addText('05. Code of Conduct:', { fontStyle: 'bold' });
+  const codeOfConductText = `As an intern, you are expected to adhere to the company's policies and code of conduct. Any behavior or actions in violation of these policies may result in immediate termination of your internship.`;
+  addText(codeOfConductText);
+  yPosition += 10;
+
+  checkPageBreak(50);
+  addText('06. Learning Objectives:', { fontStyle: 'bold' });
+  const learningObjectivesText = `This internship is designed to provide you with practical experience and professional development opportunities. You will work under the guidance of experienced professionals and participate in meaningful projects.`;
+  addText(learningObjectivesText);
+  yPosition += 15;
+}
+
 
   addOfferDetailsTable();
 
@@ -813,9 +922,9 @@ as applicable to your status as a salaried exempt employee. The company reserves
   
   yPosition -= 5; // Align date text with signature line
   addText('Date', { x: dateSigX, maxWidth: sigWidth });
+    return doc.output('blob');
 
-  return doc.output('blob');
-};
+}
 
   const getColumns = () => {
   if (screenSize.isMobile) {
@@ -838,7 +947,7 @@ as applicable to your status as a salaried exempt employee. The company reserves
           </div>
         ),
       },
-   {
+{
   title: 'Actions',
   key: 'actions',
   width: 100,
@@ -858,13 +967,12 @@ as applicable to your status as a salaried exempt employee. The company reserves
       <Button
         size="small"
         block
-        type="primary"  // Always primary type
+        type="primary"
         icon={<SendOutlined />}
         onClick={() => {
           setSelectedCandidate(record);
-          setOfferModalVisible(true);
+          setOfferTypeModalVisible(true); // Changed from setOfferModalVisible(true)
         }}
-        // Remove the disabled prop entirely
       >
         {record.offerSent ? 'Resend Offer' : 'Send Offer'}
       </Button>
@@ -904,7 +1012,7 @@ as applicable to your status as a salaried exempt employee. The company reserves
           </div>
         ),
       },
-   {
+{
   title: 'Actions',
   key: 'actions',
   width: 120,
@@ -920,13 +1028,12 @@ as applicable to your status as a salaried exempt employee. The company reserves
       />
       <Button
         size="small"
-        type="primary"  // Always primary type
+        type="primary"
         icon={<SendOutlined />}
         onClick={() => {
           setSelectedCandidate(record);
-          setOfferModalVisible(true);
+          setOfferTypeModalVisible(true); // Changed from setOfferModalVisible(true)
         }}
-        // Remove the disabled prop entirely
       />
     </Space>
   ),
@@ -1068,20 +1175,19 @@ as applicable to your status as a salaried exempt employee. The company reserves
       </Space>
     ),
   },
-  {
+{
   title: 'Send Offer',
   key: 'sendOffer',
   width: 100,
   render: (_, record) => (
     <Button
-      type="primary"  // Always primary type
+      type="primary"
       size="small"
       icon={<SendOutlined />}
       onClick={() => {
         setSelectedCandidate(record);
-        setOfferModalVisible(true);
+        setOfferTypeModalVisible(true); // Changed from setOfferModalVisible(true)
       }}
-      // Remove the disabled prop entirely
       style={{ fontSize: '11px' }}
     >
       {record.offerSent ? 'Resend' : 'Send'}
@@ -1138,10 +1244,10 @@ as applicable to your status as a salaried exempt employee. The company reserves
   <Button 
     type="primary" 
     icon={<SendOutlined />}
-    onClick={() => {
-      setSelectedCandidate(null); // Clear any selected candidate
-      setOfferModalVisible(true);
-    }}
+ onClick={() => {
+  setSelectedCandidate(null);
+  setOfferTypeModalVisible(true); // Changed this line
+}}
     style={{ 
       height: '40px',
       marginTop: screenSize.isMobile ? '12px' : '0'
@@ -1417,13 +1523,55 @@ as applicable to your status as a salaried exempt employee. The company reserves
           </div>
         )}
       </Modal>
+{/* Offer Type Selection Modal - ADD THIS NEW MODAL */}
+<Modal
+  title="Select Offer Type"
+  open={offerTypeModalVisible}
+  onCancel={() => setOfferTypeModalVisible(false)}
+  footer={null}
+  width={400}
+  centered
+>
+  <div style={{ textAlign: 'center', padding: '20px 0' }}>
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Button
+        type="primary"
+        size="large"
+        icon={<FileTextOutlined />}
+        onClick={() => {
+          setSelectedOfferType('employment');
+          setOfferTypeModalVisible(false);
+          setOfferModalVisible(true);
+        }}
+        style={{ width: '100%', height: '60px', fontSize: '16px' }}
+      >
+        Employment Offer
+      </Button>
+      
+      <Button
+        type="default"
+        size="large"
+        icon={<UserOutlined />}
+        onClick={() => {
+          setSelectedOfferType('internship');
+          setOfferTypeModalVisible(false);
+          setOfferModalVisible(true);
+        }}
+        style={{ width: '100%', height: '60px', fontSize: '16px' }}
+      >
+        Internship Offer
+      </Button>
+    </Space>
+  </div>
+</Modal>
 
-   
 
 <Modal
   destroyOnHidden
-  title={selectedCandidate ? "Send Offer Letter" : "Send Manual Offer Letter"}
-  open={offerModalVisible}
+title={selectedCandidate ? 
+  `Send ${selectedOfferType === 'internship' ? 'Internship' : 'Employment'} Offer Letter` : 
+  `Send Manual ${selectedOfferType === 'internship' ? 'Internship' : 'Employment'} Offer Letter`
+}  open={offerModalVisible}
   onCancel={() => setOfferModalVisible(false)}
   footer={null}
   width={900}
@@ -1432,29 +1580,33 @@ as applicable to your status as a salaried exempt employee. The company reserves
     layout="vertical"
     onFinish={sendOfferLetter}
     key={selectedCandidate?.id || 'manual'}
-    initialValues={selectedCandidate ? {
-      candidateName: selectedCandidate.name,
-      candidateEmail: selectedCandidate.email,
-      candidatePhone: selectedCandidate.phone,
-      candidateAddress: selectedCandidate.location || '',
-      jobTitle: selectedCandidate.jobTitle,
-      companyName: 'MyAccess Private Limited',
-      salaryAmount: selectedCandidate.expectedSalary,
-      workLocation: '',
-      reportingManager: '',
-      offerValidUntil: '7 days from offer date'
-    } : {
-      candidateName: '',
-      candidateEmail: '',
-      candidatePhone: '',
-      candidateAddress: '',
-      jobTitle: '',
-      companyName: 'MyAccess Private Limited',
-      salaryAmount: '',
-      workLocation: '',
-      reportingManager: '',
-      offerValidUntil: '7 days from offer date'
-    }}
+   initialValues={selectedCandidate ? {
+  candidateName: selectedCandidate.name,
+  candidateEmail: selectedCandidate.email,
+  candidatePhone: selectedCandidate.phone,
+  candidateAddress: selectedCandidate.location || '',
+  jobTitle: selectedCandidate?.jobTitle || (selectedOfferType === 'internship' ? 'AI Intern' : ''),      
+  companyName: 'MyAccess Private Limited',
+  salaryAmount: selectedOfferType === 'internship' ? '' : selectedCandidate.expectedSalary, // Empty for internship
+  workLocation: selectedOfferType === 'internship' ? '' : '',
+  reportingLocation: selectedOfferType === 'internship' ? 'NASSCOM CoE IoT & AI, Andhra University, Visakhapatnam' : '',
+  internshipDuration: selectedOfferType === 'internship' ? '6 months' : '',
+  reportingManager: '',
+  offerValidUntil: '7 days from offer date'
+} : {
+  candidateName: '',
+  candidateEmail: '',
+  candidatePhone: '',
+  candidateAddress: '',
+  jobTitle: selectedOfferType === 'internship' ? 'AI Intern' : '',
+  companyName: 'MyAccess Private Limited',
+  salaryAmount: '',
+  workLocation: '',
+  reportingLocation: selectedOfferType === 'internship' ? 'NASSCOM CoE IoT & AI, Andhra University, Visakhapatnam' : '',
+  internshipDuration: selectedOfferType === 'internship' ? '6 months' : '',
+  reportingManager: '',
+  offerValidUntil: '7 days from offer date'
+}}
   >
     <Alert
       message={selectedCandidate ? "Offer Letter Details" : "Manual Offer Letter"}
@@ -1506,18 +1658,30 @@ as applicable to your status as a salaried exempt employee. The company reserves
       </Col>
     </Row>
 
-    <Row gutter={16}>
-      <Col span={12}>
-        <Form.Item label="Salary Amount" name="salaryAmount" rules={[{ required: true }]}>
-          <Input prefix={<DollarOutlined />} placeholder="e.g., $75,000 per annum" />
-        </Form.Item>
-      </Col>
-      <Col span={12}>
-        <Form.Item label="Joining Date" name="joiningDate" rules={[{ required: true }]}>
-          <DatePicker style={{ width: '100%' }} />
-        </Form.Item>
-      </Col>
-    </Row>
+  
+
+<Row gutter={16}>
+  <Col span={12}>
+    <Form.Item 
+      label={selectedOfferType === 'internship' ? "Stipend Amount (Optional)" : "Salary Amount"} 
+      name="salaryAmount" 
+      rules={selectedOfferType === 'internship' ? [] : [{ required: true }]}
+    >
+      <Input 
+        prefix={<DollarOutlined />} 
+        placeholder={selectedOfferType === 'internship' ? 
+          "e.g., ₹15,000 per month (optional)" : 
+          "e.g., $75,000 per annum"
+        } 
+      />
+    </Form.Item>
+  </Col>
+  <Col span={12}>
+    <Form.Item label="Joining Date" name="joiningDate" rules={[{ required: true }]}>
+      <DatePicker style={{ width: '100%' }} />
+    </Form.Item>
+  </Col>
+</Row>
 
     <Row gutter={16}>
       <Col span={12}>
@@ -1553,7 +1717,22 @@ as applicable to your status as a salaried exempt employee. The company reserves
         rows={3} 
         placeholder="Health insurance, provident fund, flexible hours, etc."
       />
-    </Form.Item>
+    </Form.Item>{selectedOfferType === 'internship' && (
+  <>
+    <Row gutter={16}>
+      <Col span={12}>
+        <Form.Item label="Internship Duration" name="internshipDuration" rules={[{ required: true }]}>
+          <Input placeholder="e.g., 6 months" />
+        </Form.Item>
+      </Col>
+      <Col span={12}>
+        <Form.Item label="Reporting Location" name="reportingLocation" rules={[{ required: true }]}>
+          <Input placeholder="NASSCOM CoE IoT & AI, Andhra University, Visakhapatnam" />
+        </Form.Item>
+      </Col>
+    </Row>
+  </>
+)}
 
     <Form.Item label="Additional Message" name="message">
       <TextArea 
