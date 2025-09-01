@@ -2265,139 +2265,6 @@ const updateData = {
           </div>
         </div>
 
-        {/* Enhanced Access & Permissions Section */}
-        <div style={{
-          background: 'white',
-          padding: '32px',
-          borderRadius: '16px',
-          marginBottom: '32px',
-          border: '1px solid rgba(226, 232, 240, 0.8)',
-          boxShadow: '0 4px 25px rgba(0, 0, 0, 0.08)',
-          position: 'relative',
-          overflow: 'hidden'
-        }}>
-          {/* Section Background Pattern */}
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            width: '120px',
-            height: '120px',
-            background: 'radial-gradient(circle, rgba(6, 182, 212, 0.05) 0%, transparent 70%)',
-            pointerEvents: 'none'
-          }} />
-          
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              marginBottom: '28px',
-              paddingBottom: '16px',
-              borderBottom: '2px solid #f1f5f9'
-            }}>
-              <div style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, #cffafe 0%, #a5f3fc 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <TeamOutlined style={{ fontSize: '18px', color: '#0891b2' }} />
-              </div>
-              <Title level={4} style={{ 
-                margin: 0,
-                color: '#1e293b',
-                fontWeight: '600',
-                fontSize: '18px'
-              }}>
-                Access & Permissions
-              </Title>
-            </div>
-
-            <Row gutter={24} align="middle">
-              <Col xs={24} md={12}>
-                <Form.Item
-                  name="portal_access"
-                  label={
-                    <span style={{ 
-                      fontWeight: '600', 
-                      color: '#374151',
-                      fontSize: '14px'
-                    }}>
-                      Portal Access
-                    </span>
-                  }
-                  valuePropName="checked"
-                  extra={
-                    <span style={{ color: '#6b7280', fontSize: '12px' }}>
-                      Enable or disable employee portal login access
-                    </span>
-                  }
-                >
-                  <div style={{ 
-                    padding: '20px',
-                    background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
-                    borderRadius: '10px',
-                    border: '2px solid #e2e8f0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between'
-                  }}>
-                    <Text style={{ fontWeight: '500', color: '#374151' }}>
-                      Login Access Status
-                    </Text>
-                    <Switch 
-                      checkedChildren={
-                        <span style={{ fontSize: '12px', fontWeight: '600' }}>Granted</span>
-                      } 
-                      unCheckedChildren={
-                        <span style={{ fontSize: '12px', fontWeight: '600' }}>Denied</span>
-                      }
-                      style={{
-                        background: form.getFieldValue('portal_access') ? '#1F4842' : '#ef4444'
-                      }}
-                    />
-                  </div>
-                </Form.Item>
-              </Col>
-              <Col xs={24} md={12}>
-                <div style={{ 
-                  padding: '20px',
-                  background: 'linear-gradient(135deg, #fefce8 0%, #fef9c3 100%)',
-                  borderRadius: '10px',
-                  border: '2px solid #fde047',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  marginTop: '16px'
-                }}>
-                  <div style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'linear-gradient(135deg, #facc15 0%, #eab308 100%)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 4px 15px rgba(250, 204, 21, 0.3)'
-                  }}>
-                    <span style={{ fontSize: '18px' }}>📧</span>
-                  </div>
-                  <Text style={{ 
-                    color: '#a16207', 
-                    fontSize: '13px',
-                    fontWeight: '500'
-                  }}>
-                    Login credentials will be automatically sent to the employee's email address upon creation.
-                  </Text>
-                </div>
-              </Col>
-            </Row>
-          </div>
-        </div>
 
         {/* Enhanced Action Buttons */}
         <div style={{ 
@@ -2633,35 +2500,94 @@ if (filterOptions.status && filterOptions.status !== '' && filterOptions.status 
   return paginatedEmployees;
 }, []);
 
-  const fetchEmployees = useCallback(async (page = 1, pageSize = 10, search = '', filterOptions = {}) => {
+  const fetchEmployees = useCallback(async (page = 1, pageSize = 5, search = '', filterOptions = {}) => {
   try {
     setLoading(true);
     
-    let employeeList = allEmployees;
-    if (employeeList.length === 0) {
-      employeeList = await fetchAllEmployees();
-      setAllEmployees(employeeList);
-    }
+    // Calculate offset for pagination
+    const offset = (page - 1) * pageSize;
     
-    applyFiltersAndPagination(employeeList, search, page, pageSize, filterOptions);
+    // Build query
+    let query = supabaseAdmin
+      .from('users')
+      .select(`
+        id,
+        name,
+        email,
+        mobile,
+        role,
+        employee_id,
+        isactive,
+        portal_access,
+        profileimage,
+        employee_type,
+        start_date,
+        end_date,
+        created_at,
+        updated_at,
+        face_embedding,
+        department,
+        pay,
+        payroll (
+          id,
+          basic,
+          hra,
+          income_tax,
+          earnings,
+          pf,
+          pay_period,
+          pay_date
+        )
+      `, { count: 'exact' })
+      .eq('role', 'employee')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1);
+
+    // Apply search filters
+    if (search) {
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,mobile.ilike.%${search}%,employee_id.ilike.%${search}%`);
+    }
+
+    // Apply type filter
+    if (filterOptions.employeeType) {
+      query = query.eq('employee_type', filterOptions.employeeType);
+    }
+
+    // Apply status filter
+    if (filterOptions.status) {
+      const isActive = filterOptions.status === 'active';
+      query = query.eq('isactive', isActive);
+    }
+
+    const { data, error, count } = await query;
+    
+    if (error) {
+      console.error('Fetch error:', error);
+      throw error;
+    }
+
+    setEmployees(data || []);
+    setPagination({
+      current: page,
+      pageSize: pageSize,
+      total: count || 0
+    });
+    
   } catch (error) {
-    console.error('Error in fetchEmployees:', error);
+    console.error('Error fetching employees:', error);
     message.error(`Error loading employees: ${error.message}`);
   } finally {
     setLoading(false);
   }
-}, [allEmployees, fetchAllEmployees, applyFiltersAndPagination]);
+}, []);
 const refreshData = useCallback(async () => {
   try {
-    setLoading(true);
-    const employeeList = await fetchAllEmployees();
-    applyFiltersAndPagination(employeeList, searchQuery, 1, pagination.pageSize, filters);
+    await fetchEmployees(pagination.current, pagination.pageSize, searchQuery, filters);
+    await fetchAllEmployees(); // Keep this only for statistics
   } catch (error) {
     console.error('Error refreshing data:', error);
-  } finally {
-    setLoading(false);
   }
-}, [fetchAllEmployees, applyFiltersAndPagination, searchQuery, pagination.pageSize, filters]);
+}, [fetchEmployees, fetchAllEmployees, pagination.current, pagination.pageSize, searchQuery, filters]);
 
 const handleAccessToggle = useCallback(async (employeeId, hasAccess) => {
   try {
@@ -2727,49 +2653,39 @@ useEffect(() => {
 
 useEffect(() => {
   if (userRole === 'superadmin' || userRole === 'admin' || userRole === 'hr') {
-    const initializeData = async () => {
-      try {
-        setLoading(true);
-        const employeeList = await fetchAllEmployees();
-        setAllEmployees(employeeList);
-        applyFiltersAndPagination(employeeList, '', 1, 10, {});
-      } catch (error) {
-        console.error('Error initializing data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    initializeData();
+    fetchEmployees(1, 5);
+    fetchAllEmployees(); // Keep this for statistics
   }
-}, [userRole]);
+}, [userRole, fetchEmployees,fetchAllEmployees]);
+
 
 const handleEmployeeTypeFilter = useCallback((value) => {
   const newFilters = { ...filters, employeeType: value };
   setFilters(newFilters);
-  applyFiltersAndPagination(allEmployees, searchQuery, 1, pagination.pageSize, newFilters);
-}, [allEmployees, searchQuery, pagination.pageSize, applyFiltersAndPagination, filters]);
+  fetchEmployees(1, pagination.pageSize, searchQuery, newFilters);
+}, [fetchEmployees, searchQuery, pagination.pageSize, filters]);
 
 const handleStatusFilter = useCallback((value) => {
   const newFilters = { ...filters, status: value };
   setFilters(newFilters);
-  applyFiltersAndPagination(allEmployees, searchQuery, 1, pagination.pageSize, newFilters);
-}, [allEmployees, searchQuery, pagination.pageSize, applyFiltersAndPagination, filters]);
+  fetchEmployees(1, pagination.pageSize, searchQuery, newFilters);
+}, [fetchEmployees, searchQuery, pagination.pageSize, filters]);
 
 const handleClearFilters = useCallback(() => {
   const clearedFilters = { employeeType: '', status: '' };
   setFilters(clearedFilters);
   setSearchQuery('');
-  applyFiltersAndPagination(allEmployees, '', 1, pagination.pageSize, clearedFilters);
-}, [allEmployees, pagination.pageSize, applyFiltersAndPagination]);
+  fetchEmployees(1, pagination.pageSize, '', clearedFilters);
+}, [fetchEmployees, pagination.pageSize]);
 
-  const handleTableChange = useCallback((paginationInfo) => {
-  applyFiltersAndPagination(allEmployees, searchQuery, paginationInfo.current, paginationInfo.pageSize, filters);
-}, [allEmployees, searchQuery, applyFiltersAndPagination, filters]);
+const handleTableChange = useCallback((paginationInfo) => {
+  fetchEmployees(paginationInfo.current, paginationInfo.pageSize, searchQuery, filters);
+}, [fetchEmployees, searchQuery, filters]);
 
   const handleSearch = useCallback((value) => {
   setSearchQuery(value);
-  applyFiltersAndPagination(allEmployees, value, 1, pagination.pageSize, filters);
-}, [allEmployees, pagination.pageSize, applyFiltersAndPagination, filters]);
+  fetchEmployees(1, pagination.pageSize, value, filters);
+}, [fetchEmployees, pagination.pageSize, filters]);
 
   const handleEdit = useCallback((employee) => {
     setEditingEmployee(employee);
@@ -2949,23 +2865,6 @@ const handleDelete = useCallback(async (employeeId) => {
     >
       {isActive ? 'Active' : 'Inactive'}
     </Tag>
-  ),
-  responsive: ['md'],
-},
-{
-  title: 'Portal Access',
-  dataIndex: 'portal_access',
-  key: 'portalAccess',
-  width: 130,
-  render: (portalAccess, record) => (
-    <Switch
-      checked={portalAccess === true}  // ADD === true for explicit boolean check
-      onChange={(checked) => handleAccessToggle(record.id, checked)}
-      checkedChildren="Granted"
-      unCheckedChildren="Denied"
-      loading={loading}
-      size="small"
-    />
   ),
   responsive: ['md'],
 },
@@ -3248,28 +3147,32 @@ const handleDelete = useCallback(async (employeeId) => {
                 rowKey="id"
                 loading={loading}
                 pagination={{
-                  ...pagination,
-                  showSizeChanger: true,
-                  showQuickJumper: true,
-                  showTotal: (total, range) =>
-                    `${range[0]}-${range[1]} of ${total} employees`,
-                  pageSizeOptions: ['10', '20', '50', '100'],
-                     itemRender: (current, type, originalElement) => {
+  current: pagination.current,
+  pageSize: pagination.pageSize,
+  total: pagination.total,
+  showSizeChanger: true,
+  showQuickJumper: true,
+  itemRender: (current, type, originalElement) => {
     if (type === 'page') {
       return (
-        <a style={{ 
-          color: '#000000d9', 
-          backgroundColor: 'white',
-          border: '1px solid #d9d9d9'
+        <a style={{
+          color: current === pagination.current ? '#0D7139' : '#666',
+          backgroundColor: current === pagination.current ? '#f6ffed' : 'white',
+          border: `1px solid ${current === pagination.current ? '#0D7139' : '#d9d9d9'}`,
+          borderRadius: '6px',
+          fontWeight: current === pagination.current ? 600 : 400,
+          padding: '0px 8px',
+          textDecoration: 'none'
         }}>
           {current}
         </a>
       );
     }
     return originalElement;
-  }   
-                }}
+  }
+}}
                 onChange={handleTableChange}
+
                 scroll={{ x: 800 }}
                 size="middle"
               />
